@@ -1,0 +1,34 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+a.exe
+
+# Frontend
+web/node_modules/
+web/.vite/
+
+# Build output (dist is committed for go:embed)
+# internal/webui/dist/
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# DB
+*.db
+*.db-wal
+*.db-shm
+scheduler.port
+web/tsconfig.tsbuildinfo
