@@ -139,8 +139,27 @@ func (s *Store) GetDueTasks(now time.Time) ([]*model.ScheduleTask, error) {
 }
 
 func (s *Store) GetRecordingTasks() ([]*model.ScheduleTask, error) {
-	trueVal := true
-	return s.List("recording", &trueVal)
+	// Include disabled tasks that are still recording - they need cleanup
+	rows, err := s.db.Query(
+		`SELECT id, name, room_id, room_url, cron_expr, duration_min, enabled, state,
+		        next_fire_at, current_live_start, last_error, retry_count, max_retries,
+		        created_at, updated_at
+		 FROM schedule_tasks WHERE state = 'recording' ORDER BY id ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query recording tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*model.ScheduleTask
+	for rows.Next() {
+		t, err := scanTaskRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
 }
 
 func (s *Store) GetCounts() (total, recording, waiting, errored int, err error) {

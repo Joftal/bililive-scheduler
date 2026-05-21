@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Form, Input, InputNumber, Button, Card, Space, message, Divider } from 'antd';
+import { Form, Input, InputNumber, Button, Card, Space, message, Divider, Typography } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../services/api';
 import CronInput from '../components/CronInput';
@@ -14,12 +14,14 @@ export default function TaskForm() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<RoomInfo | null>(null);
+  const [taskData, setTaskData] = useState<{ room_url?: string; room_id?: string } | null>(null);
 
   useEffect(() => {
     if (isEdit) {
       setLoading(true);
       api.getTask(Number(id))
         .then((task) => {
+          setTaskData({ room_url: task.room_url, room_id: task.room_id });
           form.setFieldsValue({
             name: task.name,
             room_id: task.room_id,
@@ -28,10 +30,13 @@ export default function TaskForm() {
             max_retries: task.max_retries,
           });
         })
-        .catch((e) => message.error('加载任务失败: ' + e.message))
+        .catch((e) => {
+          message.error('加载任务失败: ' + e.message);
+          navigate('/tasks');
+        })
         .finally(() => setLoading(false));
     }
-  }, [id, isEdit, form]);
+  }, [id, isEdit, form, navigate]);
 
   const handleSubmit = async (values: CreateTaskRequest) => {
     setSaving(true);
@@ -75,7 +80,12 @@ export default function TaskForm() {
           <Input placeholder="可选，便于识别的名称" />
         </Form.Item>
 
-        {!isEdit && (
+        {isEdit && taskData ? (
+          <Form.Item label="直播间">
+            <Typography.Text>{taskData.room_url || taskData.room_id}</Typography.Text>
+            <Typography.Text type="secondary" style={{ marginLeft: 8 }}>(创建后不可更改)</Typography.Text>
+          </Form.Item>
+        ) : (
           <Form.Item
             label="直播间"
             name="room_id"

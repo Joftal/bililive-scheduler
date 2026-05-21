@@ -134,7 +134,7 @@ func (e *Engine) fireDueTasks(ctx context.Context, now time.Time) error {
 }
 
 func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now time.Time) error {
-	// Check if room is live
+	// Check if room is live (HTTP call, do outside lock)
 	isLive, isRecording, err := e.client.GetRoomStatus(ctx, task.RoomID)
 	if err != nil {
 		return fmt.Errorf("get room status: %w", err)
@@ -143,24 +143,35 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 	e.store.TaskMu.Lock()
 	defer e.store.TaskMu.Unlock()
 
+	// Re-read task from DB to confirm it's still in a fireable state
+	// (could have been deleted, disabled, or modified by API handler)
+	fresh, err := e.store.Get(task.ID)
+	if err != nil {
+		return nil // task was deleted, nothing to do
+	}
+	if !fresh.Enabled {
+		return nil // task was disabled, skip
+	}
+	if fresh.State != model.StatePending && fresh.State != model.StateWaiting {
+		return nil // task state changed, skip
+	}
+
 	if !isLive {
 		log.Printf("[cron] task %d: room %s is not live, skipping", task.ID, task.RoomID)
-		next, err := NextAfter(task.CronExpr, now)
+		next, err := NextAfter(fresh.CronExpr, now)
 		if err != nil {
 			return fmt.Errorf("compute next fire: %w", err)
 		}
-		task.NextFireAt = next
-		task.State = model.StateWaiting
-		return e.store.Update(task)
+		fresh.NextFireAt = next
+		fresh.State = model.StateWaiting
+		return e.store.Update(fresh)
 	}
 
 	if isRecording {
 		log.Printf("[cron] task %d: room %s is already recording", task.ID, task.RoomID)
-		// Don't overwrite CurrentLiveStart - we don't know the actual start time.
-		// Just ensure state is recording.
-		task.State = model.StateRecording
-		task.LastError = ""
-		return e.store.Update(task)
+		fresh.State = model.StateRecording
+		fresh.LastError = ""
+		return e.store.Update(fresh)
 	}
 
 	// Start recording
@@ -171,19 +182,19 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 
 	// Record execution
 	exec := &model.TaskExecution{
-		TaskID:    task.ID,
+		TaskID:    fresh.ID,
 		StartTime: now,
 		State:     model.StateRecording,
 	}
 	if err := e.store.AddExecution(exec); err != nil {
-		log.Printf("[cron] add execution for task %d error: %v", task.ID, err)
+		log.Printf("[cron] add execution for task %d error: %v", fresh.ID, err)
 	}
 
-	task.State = model.StateRecording
-	task.CurrentLiveStart = &now
-	task.LastError = ""
-	task.RetryCount = 0
-	return e.store.Update(task)
+	fresh.State = model.StateRecording
+	fresh.CurrentLiveStart = &now
+	fresh.LastError = ""
+	fresh.RetryCount = 0
+	return e.store.Update(fresh)
 }
 
 func (e *Engine) checkActiveRecordings(ctx context.Context, now time.Time) error {
@@ -201,6 +212,12 @@ func (e *Engine) checkActiveRecordings(ctx context.Context, now time.Time) error
 }
 
 func (e *Engine) checkRecording(ctx context.Context, task *model.ScheduleTask, now time.Time) error {
+	// If task is disabled but still recording, stop it
+	if !task.Enabled {
+		log.Printf("[cron] task %d: disabled but still recording, stopping", task.ID)
+		return e.stopTask(ctx, task, now, "task disabled")
+	}
+
 	// Check duration limit
 	if task.DurationMinutes > 0 && task.CurrentLiveStart != nil {
 		elapsed := now.Sub(*task.CurrentLiveStart)

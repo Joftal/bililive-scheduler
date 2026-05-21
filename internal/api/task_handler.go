@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -71,6 +72,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB limit
 	var req model.CreateTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
@@ -111,6 +113,7 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB limit
 	id, err := parseID(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -264,8 +267,12 @@ func (s *Server) disableTask(w http.ResponseWriter, r *http.Request) {
 	// Stop recording if active
 	if task.State == model.StateRecording {
 		if stopErr := s.client.StopRecording(r.Context(), task.RoomID); stopErr != nil {
-			// Log but continue - we still want to disable the task
-			_ = stopErr
+			log.Printf("[api] disable task %d: stop recording error: %v", id, stopErr)
+			task.State = model.StateError
+			task.LastError = "stop failed: " + stopErr.Error()
+		} else {
+			task.State = model.StateCompleted
+			task.LastError = "stopped by disable"
 		}
 	}
 
@@ -395,6 +402,10 @@ func writeJSONWithStatus(w http.ResponseWriter, status int, v any) {
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
+	if status >= 500 {
+		log.Printf("[api] internal error: %s", msg)
+		msg = "internal server error"
+	}
 	writeJSONWithStatus(w, status, map[string]string{"error": msg})
 }
 

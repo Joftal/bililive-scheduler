@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Select, Space, Tag, Typography } from 'antd';
+import { Select } from 'antd';
 import { api } from '../services/api';
 import type { RoomInfo } from '../types/task';
 
@@ -22,13 +22,7 @@ export default function RoomSelector({ value, onChange }: Props) {
 
   const options = rooms.map((r) => ({
     value: r.id,
-    label: (
-      <Space>
-        <span>{r.host_name || r.url}</span>
-        {r.room_name && <Typography.Text type="secondary">- {r.room_name}</Typography.Text>}
-        {r.is_live ? <Tag color="green">直播中</Tag> : <Tag>未开播</Tag>}
-      </Space>
-    ),
+    label: `${r.host_name || r.url}${r.room_name ? ' - ' + r.room_name : ''}${r.is_live ? ' [直播中]' : ''}`,
     room: r,
   }));
 
@@ -44,6 +38,10 @@ export default function RoomSelector({ value, onChange }: Props) {
       loading={loading}
       placeholder="选择直播间"
       optionFilterProp="label"
+      filterOption={(input, option) => {
+        if (!option?.label) return false;
+        return String(option.label).toLowerCase().includes(input.toLowerCase());
+      }}
       style={{ width: '100%' }}
       notFoundContent={loading ? '加载中...' : '无可用房间'}
     />
