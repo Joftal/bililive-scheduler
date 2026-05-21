@@ -26,6 +26,11 @@ func Init(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("enable WAL mode: %w", err)
 	}
 
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
+
 	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("run migrations: %w", err)

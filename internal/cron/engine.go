@@ -120,12 +120,14 @@ func (e *Engine) fireDueTasks(ctx context.Context, now time.Time) error {
 	for _, task := range tasks {
 		if err := e.fireTask(ctx, task, now); err != nil {
 			log.Printf("[cron] fire task %d (%s) error: %v", task.ID, task.Name, err)
+			e.store.TaskMu.Lock()
 			task.State = model.StateError
 			task.LastError = err.Error()
 			task.RetryCount++
-			if err := e.store.Update(task); err != nil {
-				log.Printf("[cron] update task %d error: %v", task.ID, err)
+			if updateErr := e.store.Update(task); updateErr != nil {
+				log.Printf("[cron] update task %d error: %v", task.ID, updateErr)
 			}
+			e.store.TaskMu.Unlock()
 		}
 	}
 	return nil
@@ -138,9 +140,11 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 		return fmt.Errorf("get room status: %w", err)
 	}
 
+	e.store.TaskMu.Lock()
+	defer e.store.TaskMu.Unlock()
+
 	if !isLive {
 		log.Printf("[cron] task %d: room %s is not live, skipping", task.ID, task.RoomID)
-		// Recompute next fire time
 		next, err := NextAfter(task.CronExpr, now)
 		if err != nil {
 			return fmt.Errorf("compute next fire: %w", err)
@@ -151,10 +155,10 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 	}
 
 	if isRecording {
-		log.Printf("[cron] task %d: room %s is already recording, skipping", task.ID, task.RoomID)
-		// Room is already recording, transition to recording state
+		log.Printf("[cron] task %d: room %s is already recording", task.ID, task.RoomID)
+		// Don't overwrite CurrentLiveStart - we don't know the actual start time.
+		// Just ensure state is recording.
 		task.State = model.StateRecording
-		task.CurrentLiveStart = &now
 		task.LastError = ""
 		return e.store.Update(task)
 	}
@@ -227,6 +231,9 @@ func (e *Engine) stopTask(ctx context.Context, task *model.ScheduleTask, now tim
 		log.Printf("[cron] task %d: stop recording error: %v (continuing)", task.ID, err)
 	}
 
+	e.store.TaskMu.Lock()
+	defer e.store.TaskMu.Unlock()
+
 	// Update execution history
 	execs, err := e.store.GetExecutions(task.ID, 1)
 	if err == nil && len(execs) > 0 {
@@ -245,6 +252,7 @@ func (e *Engine) stopTask(ctx context.Context, task *model.ScheduleTask, now tim
 }
 
 func (e *Engine) rescheduleTasks(now time.Time) error {
+	// Only load tasks in states that need rescheduling
 	tasks, err := e.store.List("", nil)
 	if err != nil {
 		return fmt.Errorf("list tasks: %w", err)
@@ -255,59 +263,62 @@ func (e *Engine) rescheduleTasks(now time.Time) error {
 			continue
 		}
 
-		switch task.State {
-		case model.StateCompleted:
-			// Reschedule for next cron occurrence
-			next, err := NextAfter(task.CronExpr, now)
-			if err != nil {
-				log.Printf("[cron] task %d: invalid cron expr %q: %v", task.ID, task.CronExpr, err)
-				task.State = model.StateError
-				task.LastError = fmt.Sprintf("invalid cron: %v", err)
-				if err := e.store.Update(task); err != nil {
-					log.Printf("[cron] update task %d error: %v", task.ID, err)
-				}
-				continue
-			}
-			task.NextFireAt = next
-			task.State = model.StateWaiting
-			task.CurrentLiveStart = nil
-			task.RetryCount = 0
+		e.store.TaskMu.Lock()
+		e.rescheduleOneTask(task, now)
+		e.store.TaskMu.Unlock()
+	}
+	return nil
+}
+
+func (e *Engine) rescheduleOneTask(task *model.ScheduleTask, now time.Time) {
+	switch task.State {
+	case model.StateCompleted:
+		next, err := NextAfter(task.CronExpr, now)
+		if err != nil {
+			log.Printf("[cron] task %d: invalid cron expr %q: %v", task.ID, task.CronExpr, err)
+			task.State = model.StateError
+			task.LastError = fmt.Sprintf("invalid cron: %v", err)
 			if err := e.store.Update(task); err != nil {
 				log.Printf("[cron] update task %d error: %v", task.ID, err)
 			}
+			return
+		}
+		task.NextFireAt = next
+		task.State = model.StateWaiting
+		task.CurrentLiveStart = nil
+		task.RetryCount = 0
+		if err := e.store.Update(task); err != nil {
+			log.Printf("[cron] update task %d error: %v", task.ID, err)
+		}
 
-		case model.StatePending:
-			// First time evaluation
-			next, err := NextAfter(task.CronExpr, now)
-			if err != nil {
-				task.State = model.StateError
-				task.LastError = fmt.Sprintf("invalid cron: %v", err)
-				if err := e.store.Update(task); err != nil {
-					log.Printf("[cron] update task %d error: %v", task.ID, err)
-				}
-				continue
-			}
-			task.NextFireAt = next
-			task.State = model.StateWaiting
+	case model.StatePending:
+		next, err := NextAfter(task.CronExpr, now)
+		if err != nil {
+			task.State = model.StateError
+			task.LastError = fmt.Sprintf("invalid cron: %v", err)
 			if err := e.store.Update(task); err != nil {
 				log.Printf("[cron] update task %d error: %v", task.ID, err)
 			}
+			return
+		}
+		task.NextFireAt = next
+		task.State = model.StateWaiting
+		if err := e.store.Update(task); err != nil {
+			log.Printf("[cron] update task %d error: %v", task.ID, err)
+		}
 
-		case model.StateError:
-			// Retry with backoff if under max retries
-			if task.RetryCount < task.MaxRetries {
-				backoff := time.Duration(1<<uint(task.RetryCount)) * time.Minute
-				if backoff > 15*time.Minute {
-					backoff = 15 * time.Minute
-				}
-				next := now.Add(backoff)
-				task.NextFireAt = &next
-				task.State = model.StateWaiting
-				if err := e.store.Update(task); err != nil {
-					log.Printf("[cron] update task %d error: %v", task.ID, err)
-				}
+	case model.StateError:
+		if task.RetryCount < task.MaxRetries {
+			backoff := time.Duration(1<<uint(task.RetryCount)) * time.Minute
+			if backoff > 15*time.Minute {
+				backoff = 15 * time.Minute
+			}
+			next := now.Add(backoff)
+			task.NextFireAt = &next
+			task.State = model.StateWaiting
+			if err := e.store.Update(task); err != nil {
+				log.Printf("[cron] update task %d error: %v", task.ID, err)
 			}
 		}
 	}
-	return nil
 }

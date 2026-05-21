@@ -11,7 +11,13 @@ import (
 var distFS embed.FS
 
 func Handler() http.Handler {
-	subFS, _ := fs.Sub(distFS, "dist")
+	subFS, err := fs.Sub(distFS, "dist")
+	if err != nil {
+		// Fallback: serve a simple error page if embed is broken
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "Web UI not available: "+err.Error(), http.StatusInternalServerError)
+		})
+	}
 	return &SPAHandler{fs: subFS}
 }
 

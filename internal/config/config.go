@@ -9,11 +9,11 @@ import (
 )
 
 type Config struct {
-	Port       int
-	APIURL     string
-	DBPath     string
-	LogLevel   string
-	Version    string
+	Port     int
+	APIURL   string
+	DBPath   string
+	LogLevel string
+	Version  string
 }
 
 func Parse() *Config {
@@ -37,6 +37,9 @@ func (c *Config) Validate() error {
 	if c.APIURL == "" {
 		return fmt.Errorf("api-url is required")
 	}
+	if c.Port < 0 || c.Port > 65535 {
+		return fmt.Errorf("port must be 0-65535")
+	}
 	return nil
 }
 
@@ -46,15 +49,29 @@ func defaultDBPath() string {
 	case "windows":
 		dir = os.Getenv("APPDATA")
 		if dir == "" {
-			dir = os.Getenv("USERPROFILE")
+			dir = os.Getenv("LOCALAPPDATA")
+		}
+		if dir == "" {
+			dir = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Roaming")
 		}
 		dir = filepath.Join(dir, "bililive-go")
 	case "darwin":
 		home := os.Getenv("HOME")
+		if home == "" {
+			home = "/tmp"
+		}
 		dir = filepath.Join(home, "Library", "Application Support", "bililive-go")
 	default:
-		home := os.Getenv("HOME")
-		dir = filepath.Join(home, ".config", "bililive-go")
+		// Linux: honor XDG_CONFIG_HOME
+		dir = os.Getenv("XDG_CONFIG_HOME")
+		if dir == "" {
+			home := os.Getenv("HOME")
+			if home == "" {
+				home = "/tmp"
+			}
+			dir = filepath.Join(home, ".config")
+		}
+		dir = filepath.Join(dir, "bililive-go")
 	}
 	return filepath.Join(dir, "db", "scheduler.db")
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -14,9 +15,9 @@ import (
 )
 
 type Server struct {
-	store    *db.Store
-	client   *client.BiliAPI
-	engine   *cron.Engine
+	store  *db.Store
+	client *client.BiliAPI
+	engine *cron.Engine
 }
 
 func NewServer(store *db.Store, client *client.BiliAPI, engine *cron.Engine) *Server {
@@ -29,13 +30,10 @@ func NewServer(store *db.Store, client *client.BiliAPI, engine *cron.Engine) *Se
 
 func (s *Server) Router() *mux.Router {
 	r := mux.NewRouter()
-
-	// CORS middleware
 	r.Use(corsMiddleware)
 
 	api := r.PathPrefix("/api").Subrouter()
 
-	// Task CRUD
 	api.HandleFunc("/tasks", s.listTasks).Methods("GET")
 	api.HandleFunc("/tasks", s.createTask).Methods("POST")
 	api.HandleFunc("/tasks/{id:[0-9]+}", s.getTask).Methods("GET")
@@ -46,15 +44,10 @@ func (s *Server) Router() *mux.Router {
 	api.HandleFunc("/tasks/{id:[0-9]+}/retry", s.retryTask).Methods("POST")
 	api.HandleFunc("/tasks/{id:[0-9]+}/history", s.taskHistory).Methods("GET")
 
-	// Scheduler status
 	api.HandleFunc("/status", s.schedulerStatus).Methods("GET")
-
-	// Rooms proxy
 	api.HandleFunc("/rooms", s.listRooms).Methods("GET")
 
-	// Health check
 	r.HandleFunc("/health", s.health).Methods("GET")
-
 	return r
 }
 
@@ -107,7 +100,11 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 
 	task, err := s.store.Get(id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "task not found")
+		if errors.Is(err, db.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "task not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 	writeJSON(w, task)
@@ -120,15 +117,23 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := s.store.Get(id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "task not found")
-		return
-	}
-
 	var req model.UpdateTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	// Lock to prevent race with cron engine
+	s.store.TaskMu.Lock()
+	defer s.store.TaskMu.Unlock()
+
+	task, err := s.store.Get(id)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "task not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 
@@ -137,7 +142,6 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.CronExpr != nil {
 		task.CronExpr = *req.CronExpr
-		// Reset next fire time for recalculation
 		if task.State == model.StateWaiting {
 			task.State = model.StatePending
 			task.NextFireAt = nil
@@ -170,6 +174,28 @@ func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Lock and check if task is recording
+	s.store.TaskMu.Lock()
+	defer s.store.TaskMu.Unlock()
+
+	task, err := s.store.Get(id)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "task not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	// Stop recording before deleting
+	if task.State == model.StateRecording {
+		if stopErr := s.client.StopRecording(r.Context(), task.RoomID); stopErr != nil {
+			writeError(w, http.StatusConflict, "cannot stop recording: "+stopErr.Error())
+			return
+		}
+	}
+
 	if err := s.store.Delete(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -185,16 +211,28 @@ func (s *Server) enableTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.store.TaskMu.Lock()
+	defer s.store.TaskMu.Unlock()
+
 	task, err := s.store.Get(id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "task not found")
+		if errors.Is(err, db.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "task not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 
 	task.Enabled = true
-	if task.State == model.StatePending {
-		task.State = model.StatePending // will be picked up by engine
+	// Reset error state so the engine can re-evaluate
+	if task.State == model.StateError {
+		task.State = model.StatePending
+		task.RetryCount = 0
+		task.LastError = ""
+		task.NextFireAt = nil
 	}
+
 	if err := s.store.Update(task); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -210,14 +248,30 @@ func (s *Server) disableTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.store.TaskMu.Lock()
+	defer s.store.TaskMu.Unlock()
+
 	task, err := s.store.Get(id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "task not found")
+		if errors.Is(err, db.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "task not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
 		return
+	}
+
+	// Stop recording if active
+	if task.State == model.StateRecording {
+		if stopErr := s.client.StopRecording(r.Context(), task.RoomID); stopErr != nil {
+			// Log but continue - we still want to disable the task
+			_ = stopErr
+		}
 	}
 
 	task.Enabled = false
 	task.NextFireAt = nil
+
 	if err := s.store.Update(task); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -233,9 +287,16 @@ func (s *Server) retryTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.store.TaskMu.Lock()
+	defer s.store.TaskMu.Unlock()
+
 	task, err := s.store.Get(id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "task not found")
+		if errors.Is(err, db.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "task not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 
@@ -268,6 +329,9 @@ func (s *Server) taskHistory(w http.ResponseWriter, r *http.Request) {
 		if v, err := strconv.Atoi(l); err == nil && v > 0 {
 			limit = v
 		}
+	}
+	if limit > 500 {
+		limit = 500
 	}
 
 	execs, err := s.store.GetExecutions(id, limit)
@@ -311,11 +375,9 @@ func (s *Server) listRooms(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, rooms)
 }
 
-func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]bool{"ok": true})
 }
-
-// --- helpers ---
 
 func parseID(r *http.Request) (int64, error) {
 	vars := mux.Vars(r)

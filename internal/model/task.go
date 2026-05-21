@@ -3,7 +3,11 @@ package model
 import (
 	"fmt"
 	"time"
+
+	cronlib "github.com/robfig/cron/v3"
 )
+
+var cronParser = cronlib.NewParser(cronlib.Minute | cronlib.Hour | cronlib.Dom | cronlib.Month | cronlib.Dow)
 
 type TaskState string
 
@@ -83,11 +87,17 @@ func (t *ScheduleTask) Validate() error {
 	if t.CronExpr == "" {
 		return fmt.Errorf("cron_expr is required")
 	}
+	if _, err := cronParser.Parse(t.CronExpr); err != nil {
+		return fmt.Errorf("invalid cron_expr %q: %w", t.CronExpr, err)
+	}
 	if t.DurationMinutes < 0 {
 		return fmt.Errorf("duration_min must be >= 0")
 	}
 	if t.MaxRetries < 0 {
 		return fmt.Errorf("max_retries must be >= 0")
+	}
+	if len(t.Name) > 256 {
+		return fmt.Errorf("name must be <= 256 characters")
 	}
 	return nil
 }

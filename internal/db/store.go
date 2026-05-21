@@ -2,14 +2,21 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/kira1928/bililive-scheduler/internal/model"
 )
 
+var ErrNotFound = errors.New("task not found")
+
 type Store struct {
 	db *sql.DB
+	// TaskMu serializes all task state transitions (read-modify-write cycles)
+	// between the cron engine and API handlers to prevent lost updates.
+	TaskMu sync.Mutex
 }
 
 func NewStore(db *sql.DB) *Store {
@@ -41,7 +48,14 @@ func (s *Store) Get(id int64) (*model.ScheduleTask, error) {
 		        created_at, updated_at
 		 FROM schedule_tasks WHERE id = ?`, id,
 	)
-	return scanTask(row)
+	t, err := scanTask(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return t, nil
 }
 
 func (s *Store) List(state string, enabled *bool) ([]*model.ScheduleTask, error) {

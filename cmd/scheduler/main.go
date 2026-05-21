@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/kira1928/bililive-scheduler/internal/api"
 	"github.com/kira1928/bililive-scheduler/internal/client"
@@ -44,11 +45,11 @@ func main() {
 	engine := cron.NewEngine(store, biliClient, 0) // default 15s interval
 
 	// Start cron engine in background
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	engineCtx, engineCancel := context.WithCancel(context.Background())
+	defer engineCancel()
 
 	go func() {
-		if err := engine.Start(ctx); err != nil {
+		if err := engine.Start(engineCtx); err != nil {
 			log.Printf("[cron] engine exited: %v", err)
 		}
 	}()
@@ -69,7 +70,8 @@ func main() {
 	log.Printf("[main] listening on port %d", actualPort)
 
 	// Write port file for parent process discovery
-	if err := writePortFile(cfg.DBPath, actualPort); err != nil {
+	portFile := filepath.Join(filepath.Dir(cfg.DBPath), "scheduler.port")
+	if err := os.WriteFile(portFile, []byte(fmt.Sprintf("%d", actualPort)), 0644); err != nil {
 		log.Printf("[main] warning: failed to write port file: %v", err)
 	}
 
@@ -87,21 +89,26 @@ func main() {
 	sig := <-sigCh
 	log.Printf("[main] received signal %v, shutting down...", sig)
 
-	// Graceful shutdown
-	cancel() // stop cron engine
+	// Stop cron engine first
+	engineCancel()
 
-	// Stop active recordings before exit
-	if err := stopActiveRecordings(ctx, store, biliClient); err != nil {
+	// Stop active recordings using a FRESH context (the engine context is already cancelled)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := stopActiveRecordings(shutdownCtx, store, biliClient); err != nil {
 		log.Printf("[main] error stopping active recordings: %v", err)
 	}
 
-	httpServer.Close()
-	log.Printf("[main] shutdown complete")
-}
+	// Graceful HTTP shutdown (waits for in-flight requests)
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("[main] HTTP shutdown error: %v", err)
+	}
 
-func writePortFile(dbPath string, port int) error {
-	portFile := filepath.Join(filepath.Dir(dbPath), "scheduler.port")
-	return os.WriteFile(portFile, []byte(fmt.Sprintf("%d", port)), 0644)
+	// Clean up port file
+	os.Remove(portFile)
+
+	log.Printf("[main] shutdown complete")
 }
 
 func stopActiveRecordings(ctx context.Context, store *db.Store, client *client.BiliAPI) error {
