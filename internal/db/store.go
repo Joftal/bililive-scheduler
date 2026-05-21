@@ -189,10 +189,12 @@ func (s *Store) GetExecutions(taskID int64, limit int) ([]*model.TaskExecution, 
 	for rows.Next() {
 		e := &model.TaskExecution{}
 		var state string
-		if err := rows.Scan(&e.ID, &e.TaskID, &e.StartTime, &e.EndTime, &state, &e.Error); err != nil {
+		var errStr sql.NullString
+		if err := rows.Scan(&e.ID, &e.TaskID, &e.StartTime, &e.EndTime, &state, &errStr); err != nil {
 			return nil, fmt.Errorf("scan execution: %w", err)
 		}
 		e.State = model.TaskState(state)
+		e.Error = errStr.String
 		execs = append(execs, e)
 	}
 	return execs, rows.Err()
@@ -202,15 +204,17 @@ func scanTask(row *sql.Row) (*model.ScheduleTask, error) {
 	t := &model.ScheduleTask{}
 	var state string
 	var enabled int
+	var lastError sql.NullString
 	if err := row.Scan(
 		&t.ID, &t.Name, &t.RoomID, &t.RoomURL, &t.CronExpr, &t.DurationMinutes,
 		&enabled, &state, &t.NextFireAt, &t.CurrentLiveStart,
-		&t.LastError, &t.RetryCount, &t.MaxRetries, &t.CreatedAt, &t.UpdatedAt,
+		&lastError, &t.RetryCount, &t.MaxRetries, &t.CreatedAt, &t.UpdatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("scan task: %w", err)
 	}
 	t.Enabled = enabled != 0
 	t.State = model.TaskState(state)
+	t.LastError = lastError.String
 	return t, nil
 }
 
@@ -218,15 +222,17 @@ func scanTaskRows(rows *sql.Rows) (*model.ScheduleTask, error) {
 	t := &model.ScheduleTask{}
 	var state string
 	var enabled int
+	var lastError sql.NullString
 	if err := rows.Scan(
 		&t.ID, &t.Name, &t.RoomID, &t.RoomURL, &t.CronExpr, &t.DurationMinutes,
 		&enabled, &state, &t.NextFireAt, &t.CurrentLiveStart,
-		&t.LastError, &t.RetryCount, &t.MaxRetries, &t.CreatedAt, &t.UpdatedAt,
+		&lastError, &t.RetryCount, &t.MaxRetries, &t.CreatedAt, &t.UpdatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("scan task: %w", err)
 	}
 	t.Enabled = enabled != 0
 	t.State = model.TaskState(state)
+	t.LastError = lastError.String
 	return t, nil
 }
 
