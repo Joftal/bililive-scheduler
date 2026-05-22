@@ -56,7 +56,7 @@ func (s *Store) Get(id int64) (*model.ScheduleTask, error) {
 	row := s.db.QueryRow(
 		`SELECT `+taskColumns+` FROM schedule_tasks WHERE id = ?`, id,
 	)
-	t, err := scanTask(row)
+	t, err := scanTaskFrom(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -89,7 +89,7 @@ func (s *Store) List(state string, enabled *bool) ([]*model.ScheduleTask, error)
 
 	var tasks []*model.ScheduleTask
 	for rows.Next() {
-		t, err := scanTaskRows(rows)
+		t, err := scanTaskFrom(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -138,7 +138,7 @@ func (s *Store) GetDueTasks(now time.Time) ([]*model.ScheduleTask, error) {
 
 	var tasks []*model.ScheduleTask
 	for rows.Next() {
-		t, err := scanTaskRows(rows)
+		t, err := scanTaskFrom(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -159,7 +159,7 @@ func (s *Store) GetRecordingTasks() ([]*model.ScheduleTask, error) {
 
 	var tasks []*model.ScheduleTask
 	for rows.Next() {
-		t, err := scanTaskRows(rows)
+		t, err := scanTaskFrom(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -169,19 +169,13 @@ func (s *Store) GetRecordingTasks() ([]*model.ScheduleTask, error) {
 }
 
 func (s *Store) GetCounts() (total, recording, waiting, errored int, err error) {
-	err = s.db.QueryRow("SELECT COUNT(*) FROM schedule_tasks").Scan(&total)
-	if err != nil {
-		return
-	}
-	err = s.db.QueryRow("SELECT COUNT(*) FROM schedule_tasks WHERE state = 'recording'").Scan(&recording)
-	if err != nil {
-		return
-	}
-	err = s.db.QueryRow("SELECT COUNT(*) FROM schedule_tasks WHERE state IN ('pending', 'waiting') AND enabled = 1").Scan(&waiting)
-	if err != nil {
-		return
-	}
-	err = s.db.QueryRow("SELECT COUNT(*) FROM schedule_tasks WHERE state = 'error'").Scan(&errored)
+	err = s.db.QueryRow(`
+		SELECT COUNT(*),
+		       SUM(CASE WHEN state = 'recording' THEN 1 ELSE 0 END),
+		       SUM(CASE WHEN state IN ('pending', 'waiting') AND enabled = 1 THEN 1 ELSE 0 END),
+		       SUM(CASE WHEN state = 'error' THEN 1 ELSE 0 END)
+		FROM schedule_tasks
+	`).Scan(&total, &recording, &waiting, &errored)
 	return
 }
 
@@ -239,34 +233,17 @@ func (s *Store) GetExecutions(taskID int64, limit int) ([]*model.TaskExecution, 
 	return execs, rows.Err()
 }
 
-func scanTask(row *sql.Row) (*model.ScheduleTask, error) {
-	t := &model.ScheduleTask{}
-	var state string
-	var enabled int
-	var lastError sql.NullString
-	var schedulesStr sql.NullString
-	if err := row.Scan(
-		&t.ID, &t.Name, &t.RoomID, &t.RoomURL,
-		&enabled, &state, &t.NextFireAt, &t.CurrentLiveStart,
-		&lastError, &t.RetryCount, &t.MaxRetries, &t.CreatedAt, &t.UpdatedAt,
-		&schedulesStr, &t.CurrentScheduleIdx, &t.NextFireScheduleIdx,
-	); err != nil {
-		return nil, fmt.Errorf("scan task: %w", err)
-	}
-	t.Enabled = enabled != 0
-	t.State = model.TaskState(state)
-	t.LastError = lastError.String
-	t.Schedules = parseSchedules(schedulesStr.String)
-	return t, nil
+type scanner interface {
+	Scan(dest ...any) error
 }
 
-func scanTaskRows(rows *sql.Rows) (*model.ScheduleTask, error) {
+func scanTaskFrom(s scanner) (*model.ScheduleTask, error) {
 	t := &model.ScheduleTask{}
 	var state string
 	var enabled int
 	var lastError sql.NullString
 	var schedulesStr sql.NullString
-	if err := rows.Scan(
+	if err := s.Scan(
 		&t.ID, &t.Name, &t.RoomID, &t.RoomURL,
 		&enabled, &state, &t.NextFireAt, &t.CurrentLiveStart,
 		&lastError, &t.RetryCount, &t.MaxRetries, &t.CreatedAt, &t.UpdatedAt,
