@@ -34,9 +34,9 @@ func (s *Store) Create(t *model.ScheduleTask) error {
 		return fmt.Errorf("marshal schedules: %w", err)
 	}
 	result, err := s.db.Exec(
-		`INSERT INTO schedule_tasks (name, room_id, room_url, cron_expr, duration_min, enabled, state,
+		`INSERT INTO schedule_tasks (name, room_id, room_url, enabled, state,
 		  max_retries, created_at, updated_at, schedules, current_schedule_idx, next_fire_schedule_idx)
-		 VALUES (?, ?, ?, '', 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.Name, t.RoomID, t.RoomURL,
 		boolToInt(t.Enabled), string(t.State), t.MaxRetries, t.CreatedAt, t.UpdatedAt,
 		string(schedulesJSON), t.CurrentScheduleIdx, t.NextFireScheduleIdx,

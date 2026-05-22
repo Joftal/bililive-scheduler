@@ -47,8 +47,6 @@ func migrate(db *sql.DB) error {
 			name            TEXT NOT NULL DEFAULT '',
 			room_id         TEXT NOT NULL,
 			room_url        TEXT NOT NULL DEFAULT '',
-			cron_expr       TEXT NOT NULL,
-			duration_min    INTEGER NOT NULL DEFAULT 0,
 			enabled         INTEGER NOT NULL DEFAULT 1,
 			state           TEXT NOT NULL DEFAULT 'pending',
 			next_fire_at    TIMESTAMP,
@@ -57,7 +55,10 @@ func migrate(db *sql.DB) error {
 			retry_count     INTEGER NOT NULL DEFAULT 0,
 			max_retries     INTEGER NOT NULL DEFAULT 3,
 			created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			schedules       TEXT DEFAULT '[]',
+			current_schedule_idx INTEGER DEFAULT -1,
+			next_fire_schedule_idx INTEGER DEFAULT -1
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_enabled ON schedule_tasks(enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_next_fire ON schedule_tasks(next_fire_at)`,
@@ -88,9 +89,21 @@ func migrate(db *sql.DB) error {
 	}
 	for _, m := range alterMigrations {
 		if _, err := db.Exec(m); err != nil {
-			// Ignore "duplicate column" errors for idempotency
 			if !isDuplicateColumnError(err) {
 				return fmt.Errorf("execute alter migration: %w", err)
+			}
+		}
+	}
+
+	// Remove deprecated columns (idempotent: ignore if already dropped)
+	dropMigrations := []string{
+		`ALTER TABLE schedule_tasks DROP COLUMN cron_expr`,
+		`ALTER TABLE schedule_tasks DROP COLUMN duration_min`,
+	}
+	for _, m := range dropMigrations {
+		if _, err := db.Exec(m); err != nil {
+			if !isNoSuchColumnError(err) {
+				return fmt.Errorf("execute drop migration: %w", err)
 			}
 		}
 	}
@@ -104,4 +117,12 @@ func isDuplicateColumnError(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists")
+}
+
+func isNoSuchColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "no such column") || strings.Contains(msg, "duplicate column name")
 }
