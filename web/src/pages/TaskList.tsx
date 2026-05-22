@@ -251,10 +251,11 @@ export default function TaskList() {
                 rowKey="id"
                 size="small"
                 pagination={false}
+                tableLayout="fixed"
                 style={{ margin: '0 16px' }}
                 columns={[
-                  { title: '开始时间', dataIndex: 'start_time', render: (t: string) => dayjs(t).format('MM-DD HH:mm:ss') },
-                  { title: '结束时间', dataIndex: 'end_time', render: (t: string | null) => t ? dayjs(t).format('MM-DD HH:mm:ss') : '-', width: 170 },
+                  { title: '开始时间', dataIndex: 'start_time', width: 170, render: (t: string) => dayjs(t).format('MM-DD HH:mm:ss') },
+                  { title: '结束时间', dataIndex: 'end_time', width: 170, render: (t: string | null) => t ? dayjs(t).format('MM-DD HH:mm:ss') : '-' },
                   { title: '状态', dataIndex: 'state', width: 100, render: (s: string) => <StatusBadge state={s as ScheduleTask['state']} /> },
                   { title: '备注', dataIndex: 'error', ellipsis: true },
                 ]}
