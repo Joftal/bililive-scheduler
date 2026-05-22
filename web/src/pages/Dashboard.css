@@ -24,16 +24,6 @@
   color: rgba(0, 0, 0, 0.45);
 }
 
-/* Section title with blue accent bar */
-.section-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: #262626;
-  border-left: 4px solid #1890ff;
-  padding-left: 10px;
-  margin: 0 0 16px 0;
-}
-
 /* Stat cards grid */
 .stat-grid {
   display: grid;
@@ -90,11 +80,6 @@
 .stat-icon.blue {
   background: #e6f7ff;
   color: #1890ff;
-}
-
-.stat-icon.orange {
-  background: #fff7e6;
-  color: #fa8c16;
 }
 
 .stat-icon.red {

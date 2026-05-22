@@ -27,13 +27,12 @@ func NewBiliAPI(baseURL string) *BiliAPI {
 }
 
 type liveInfo struct {
-	ID        string `json:"id"`
-	HostName  string `json:"host_name"`
-	RoomName  string `json:"room_name"`
-	RawURL    string `json:"raw_url"`
-	Status    bool   `json:"status"`
-	Listening bool   `json:"listening"`
-	Recording bool   `json:"recording"`
+	ID       string `json:"id"`
+	HostName string `json:"host_name"`
+	RoomName string `json:"room_name"`
+	RawURL   string `json:"raw_url"`
+	Status   bool   `json:"status"`
+	Recording bool  `json:"recording"`
 }
 
 type RoomInfo struct {

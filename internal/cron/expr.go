@@ -8,20 +8,7 @@ import (
 	cronlib "github.com/robfig/cron/v3"
 )
 
-var Parser = cronlib.NewParser(cronlib.Minute | cronlib.Hour | cronlib.Dom | cronlib.Month | cronlib.Dow)
-
-func Parse(expr string) (cronlib.Schedule, error) {
-	return Parser.Parse(expr)
-}
-
-func NextAfter(expr string, from time.Time) (*time.Time, error) {
-	schedule, err := Parse(expr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid cron expression %q: %w", expr, err)
-	}
-	next := schedule.Next(from)
-	return &next, nil
-}
+var parser = cronlib.NewParser(cronlib.Minute | cronlib.Hour | cronlib.Dom | cronlib.Month | cronlib.Dow)
 
 // NextScheduleAfter finds the earliest next fire time across all schedule entries.
 // Returns the fire time and the index of the entry that produces it.
@@ -37,7 +24,7 @@ func NextScheduleAfter(entries []model.ScheduleEntry, from time.Time) (*time.Tim
 		if entry.CronExpr == "" {
 			continue
 		}
-		schedule, err := Parse(entry.CronExpr)
+		schedule, err := parser.Parse(entry.CronExpr)
 		if err != nil {
 			continue
 		}

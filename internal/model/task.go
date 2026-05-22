@@ -84,18 +84,10 @@ type SchedulerStatus struct {
 	Uptime           string `json:"uptime"`
 }
 
-type RoomInfo struct {
-	ID       string `json:"id"`
-	HostName string `json:"host_name"`
-	RoomName string `json:"room_name"`
-	URL      string `json:"url"`
-	IsLive   bool   `json:"is_live"`
-}
-
-// GenerateCronForEntry generates a cron expression from a ScheduleEntry's Days and StartTime.
+// generateCronForEntry generates a cron expression from a ScheduleEntry's Days and StartTime.
 // Days are in ISO 8601 format (1=Mon..7=Sun), converted to cron format (0=Sun..6=Sat).
 // Example: Days=[1,3,5], StartTime="20:30" => "30 20 * * 1,3,5"
-func GenerateCronForEntry(entry ScheduleEntry) (string, error) {
+func generateCronForEntry(entry ScheduleEntry) (string, error) {
 	parts := timeRegex.FindStringSubmatch(entry.StartTime)
 	if parts == nil {
 		return "", fmt.Errorf("invalid start_time %q: must be HH:MM (24-hour)", entry.StartTime)
@@ -157,7 +149,7 @@ func (e *ScheduleEntry) Validate() error {
 		return fmt.Errorf("duration_min must be >= 0")
 	}
 
-	cronExpr, err := GenerateCronForEntry(*e)
+	cronExpr, err := generateCronForEntry(*e)
 	if err != nil {
 		return err
 	}
