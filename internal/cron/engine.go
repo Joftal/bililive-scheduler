@@ -170,7 +170,30 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 	}
 
 	if !isLive {
-		log.Printf("[cron] task %d: room %s is not live, skipping", task.ID, task.RoomID)
+		monitorMin := fresh.GetEffectiveMonitorMin(fresh.CurrentScheduleIdx)
+		if monitorMin > 0 {
+			// Monitoring mode: keep checking within the monitoring window
+			if fresh.MonitorUntil == nil {
+				// First check — set monitoring window from the scheduled fire time
+				monitorEnd := fresh.NextFireAt.Add(time.Duration(monitorMin) * time.Minute)
+				fresh.MonitorUntil = &monitorEnd
+			}
+			if now.Before(*fresh.MonitorUntil) {
+				// Still within monitoring window — check again next tick
+				log.Printf("[cron] task %d: room %s not live, monitoring until %s",
+					task.ID, task.RoomID, fresh.MonitorUntil.Format("15:04:05"))
+				tickDur := time.Duration(e.interval.Load()) * time.Second
+				nextTick := now.Add(tickDur)
+				fresh.NextFireAt = &nextTick
+				fresh.State = model.StateWaiting
+				return e.store.Update(fresh)
+			}
+			// Monitoring window expired — give up and reschedule
+			log.Printf("[cron] task %d: room %s monitoring window expired", task.ID, task.RoomID)
+			fresh.MonitorUntil = nil
+		} else {
+			log.Printf("[cron] task %d: room %s is not live, skipping", task.ID, task.RoomID)
+		}
 		next, schedIdx, err := nextFireTime(fresh, now)
 		if err != nil {
 			return fmt.Errorf("compute next fire: %w", err)
@@ -185,6 +208,7 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 		log.Printf("[cron] task %d: room %s is already recording", task.ID, task.RoomID)
 		fresh.State = model.StateRecording
 		fresh.LastError = ""
+		fresh.MonitorUntil = nil
 		if len(fresh.Schedules) > 0 {
 			fresh.CurrentScheduleIdx = fresh.NextFireScheduleIdx
 		}
@@ -223,6 +247,7 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 	fresh.CurrentLiveStart = &now
 	fresh.LastError = ""
 	fresh.RetryCount = 0
+	fresh.MonitorUntil = nil
 	// Set CurrentScheduleIdx from NextFireScheduleIdx
 	if len(fresh.Schedules) > 0 {
 		fresh.CurrentScheduleIdx = fresh.NextFireScheduleIdx
@@ -337,6 +362,7 @@ func (e *Engine) stopTask(ctx context.Context, task *model.ScheduleTask, now tim
 		fresh.LastError = reason
 	}
 	fresh.CurrentScheduleIdx = -1
+	fresh.MonitorUntil = nil
 	return e.store.Update(fresh)
 }
 
@@ -382,6 +408,7 @@ func (e *Engine) rescheduleOneTask(task *model.ScheduleTask, now time.Time) {
 		task.State = model.StateWaiting
 		task.CurrentLiveStart = nil
 		task.CurrentScheduleIdx = -1
+		task.MonitorUntil = nil
 		task.RetryCount = 0
 		if err := e.store.Update(task); err != nil {
 			log.Printf("[cron] update task %d error: %v", task.ID, err)

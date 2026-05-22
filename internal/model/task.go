@@ -29,6 +29,7 @@ type ScheduleEntry struct {
 	Days        []int  `json:"days"`         // 1=Mon, 2=Tue, ..., 6=Sat, 7=Sun (ISO 8601)
 	StartTime   string `json:"start_time"`   // "HH:MM" format, 24-hour
 	DurationMin int    `json:"duration_min"` // 0 = until stream ends
+	MonitorMin  int    `json:"monitor_min"`  // 0 = check once, >0 = keep checking for N minutes
 	CronExpr    string `json:"cron_expr"`    // auto-generated, read-only for clients
 }
 
@@ -41,6 +42,7 @@ type ScheduleTask struct {
 	State               TaskState       `json:"state"`
 	NextFireAt          *time.Time      `json:"next_fire_at"`
 	CurrentLiveStart    *time.Time      `json:"current_live_start"`
+	MonitorUntil        *time.Time      `json:"monitor_until"`
 	LastError           string          `json:"last_error"`
 	RetryCount          int             `json:"retry_count"`
 	MaxRetries          int             `json:"max_retries"`
@@ -148,6 +150,9 @@ func (e *ScheduleEntry) Validate() error {
 	if e.DurationMin < 0 {
 		return fmt.Errorf("duration_min must be >= 0")
 	}
+	if e.MonitorMin < 0 {
+		return fmt.Errorf("monitor_min must be >= 0")
+	}
 
 	cronExpr, err := generateCronForEntry(*e)
 	if err != nil {
@@ -161,6 +166,14 @@ func (e *ScheduleEntry) Validate() error {
 func (t *ScheduleTask) GetEffectiveDuration(scheduleIdx int) int {
 	if scheduleIdx >= 0 && scheduleIdx < len(t.Schedules) {
 		return t.Schedules[scheduleIdx].DurationMin
+	}
+	return 0
+}
+
+// GetEffectiveMonitorMin returns the monitor duration for the given schedule index.
+func (t *ScheduleTask) GetEffectiveMonitorMin(scheduleIdx int) int {
+	if scheduleIdx >= 0 && scheduleIdx < len(t.Schedules) {
+		return t.Schedules[scheduleIdx].MonitorMin
 	}
 	return 0
 }

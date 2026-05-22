@@ -50,6 +50,7 @@ func migrate(db *sql.DB) error {
 			state           TEXT NOT NULL DEFAULT 'pending',
 			next_fire_at    TIMESTAMP,
 			current_live_start TIMESTAMP,
+			monitor_until   TIMESTAMP,
 			last_error      TEXT,
 			retry_count     INTEGER NOT NULL DEFAULT 0,
 			max_retries     INTEGER NOT NULL DEFAULT 3,

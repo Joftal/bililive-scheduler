@@ -26,7 +26,7 @@ func NewStore(db *sql.DB) *Store {
 }
 
 const taskColumns = `id, name, room_id, room_url, enabled, state,
-                     next_fire_at, current_live_start, last_error, retry_count, max_retries,
+                     next_fire_at, current_live_start, monitor_until, last_error, retry_count, max_retries,
                      created_at, updated_at, schedules, current_schedule_idx, next_fire_schedule_idx`
 
 func (s *Store) Create(t *model.ScheduleTask) error {
@@ -108,12 +108,12 @@ func (s *Store) Update(t *model.ScheduleTask) error {
 	_, err = s.db.Exec(
 		`UPDATE schedule_tasks SET
 			name = ?, room_id = ?, room_url = ?,
-			enabled = ?, state = ?, next_fire_at = ?, current_live_start = ?,
+			enabled = ?, state = ?, next_fire_at = ?, current_live_start = ?, monitor_until = ?,
 			last_error = ?, retry_count = ?, max_retries = ?, updated_at = ?,
 			schedules = ?, current_schedule_idx = ?, next_fire_schedule_idx = ?
 		 WHERE id = ?`,
 		t.Name, t.RoomID, t.RoomURL,
-		boolToInt(t.Enabled), string(t.State), t.NextFireAt, t.CurrentLiveStart,
+		boolToInt(t.Enabled), string(t.State), t.NextFireAt, t.CurrentLiveStart, t.MonitorUntil,
 		t.LastError, t.RetryCount, t.MaxRetries, t.UpdatedAt,
 		string(schedulesJSON), t.CurrentScheduleIdx, t.NextFireScheduleIdx, t.ID,
 	)
@@ -269,7 +269,7 @@ func scanTaskFrom(s scanner) (*model.ScheduleTask, error) {
 	var schedulesStr sql.NullString
 	if err := s.Scan(
 		&t.ID, &t.Name, &t.RoomID, &t.RoomURL,
-		&enabled, &state, &t.NextFireAt, &t.CurrentLiveStart,
+		&enabled, &state, &t.NextFireAt, &t.CurrentLiveStart, &t.MonitorUntil,
 		&lastError, &t.RetryCount, &t.MaxRetries, &t.CreatedAt, &t.UpdatedAt,
 		&schedulesStr, &t.CurrentScheduleIdx, &t.NextFireScheduleIdx,
 	); err != nil {

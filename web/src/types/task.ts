@@ -4,6 +4,7 @@ export interface ScheduleEntry {
   days: number[];        // 1=Mon, 2=Tue, ..., 6=Sat, 7=Sun (ISO 8601)
   start_time: string;    // "HH:MM"
   duration_min: number;  // 0 = until stream ends
+  monitor_min: number;   // 0 = check once, >0 = keep checking for N minutes
   cron_expr: string;     // auto-generated, read-only
 }
 

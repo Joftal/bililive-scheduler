@@ -60,7 +60,7 @@ export default function ScheduleEditor({ value = [], onChange }: Props) {
   const addEntry = () => {
     updateEntries([
       ...entries,
-      { days: [1, 2, 3, 4, 5], start_time: '20:00', duration_min: 0, cron_expr: '' },
+      { days: [1, 2, 3, 4, 5], start_time: '20:00', duration_min: 0, monitor_min: 0, cron_expr: '' },
     ]);
   };
 
@@ -163,6 +163,22 @@ export default function ScheduleEditor({ value = [], onChange }: Props) {
                 />
                 <span className="duration-hint">
                   {entry.duration_min === 0 ? '直到直播结束' : ''}
+                </span>
+              </Space>
+            </div>
+            <div className="entry-field">
+              <div className="field-label">监控时长</div>
+              <Space>
+                <InputNumber
+                  min={0}
+                  max={1440}
+                  value={entry.monitor_min}
+                  onChange={(v) => updateEntry(index, { monitor_min: v ?? 0 })}
+                  addonAfter="分钟"
+                  style={{ width: 140 }}
+                />
+                <span className="duration-hint">
+                  {entry.monitor_min === 0 ? '不监控' : `开播后${entry.monitor_min}分钟内触发`}
                 </span>
               </Space>
             </div>

@@ -36,8 +36,9 @@ function formatDays(days: number[]): string {
 function formatScheduleSummary(schedules: ScheduleEntry[]): string {
   return schedules.map((s) => {
     const days = formatDays(s.days);
-    const duration = s.duration_min > 0 ? ` (${s.duration_min}min)` : '';
-    return `${days} ${s.start_time}${duration}`;
+    const duration = s.duration_min > 0 ? ` ${s.duration_min}min` : '';
+    const monitor = s.monitor_min > 0 ? ` [监控${s.monitor_min}min]` : '';
+    return `${days} ${s.start_time}${duration}${monitor}`;
   }).join(' / ');
 }
 
