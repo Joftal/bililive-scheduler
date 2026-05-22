@@ -7,15 +7,15 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import StatusBadge from '../components/StatusBadge';
-import type { ScheduleTask, TaskExecution, RoomInfo } from '../types/task';
+import type { ScheduleTask, ScheduleEntry, TaskExecution, RoomInfo } from '../types/task';
 import dayjs from 'dayjs';
 
 const DAY_NAMES: Record<number, string> = {
-  1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六', 7: '日',
+  1: '周一', 2: '周二', 3: '周三', 4: '周四', 5: '周五', 6: '周六', 7: '周日',
 };
 
-function formatDayRanges(days: number[]): string[] {
-  if (days.length === 0) return [];
+function formatDayRanges(days: number[]): string {
+  if (days.length === 0) return '';
   const sorted = [...days].sort((a, b) => a - b);
   const ranges: string[] = [];
   let start = sorted[0];
@@ -24,13 +24,27 @@ function formatDayRanges(days: number[]): string[] {
     if (sorted[i] === end + 1) {
       end = sorted[i];
     } else {
-      ranges.push(start === end ? DAY_NAMES[start] : `${DAY_NAMES[start]}-${DAY_NAMES[end]}`);
+      ranges.push(start === end ? DAY_NAMES[start] : `${DAY_NAMES[start]}—${DAY_NAMES[end]}`);
       start = sorted[i];
       end = sorted[i];
     }
   }
-  ranges.push(start === end ? DAY_NAMES[start] : `${DAY_NAMES[start]}-${DAY_NAMES[end]}`);
-  return ranges;
+  ranges.push(start === end ? DAY_NAMES[start] : `${DAY_NAMES[start]}—${DAY_NAMES[end]}`);
+  return ranges.join('、');
+}
+
+function formatSchedule(s: ScheduleEntry): { days: string; detail: string } {
+  const days = formatDayRanges(s.days);
+  const parts: string[] = [`${s.start_time} 开始`];
+  if (s.duration_min > 0) {
+    parts.push(`录制 ${s.duration_min} 分钟`);
+  } else {
+    parts.push('直到下播');
+  }
+  if (s.monitor_min > 0) {
+    parts.push(`监控 ${s.monitor_min} 分钟`);
+  }
+  return { days, detail: parts.join(' · ') };
 }
 
 export default function TaskList() {
@@ -144,21 +158,13 @@ export default function TaskList() {
         const schedules = r.schedules || [];
         if (schedules.length === 0) return <Typography.Text type="secondary">-</Typography.Text>;
         return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {schedules.map((s, i) => {
-              const ranges = formatDayRanges(s.days);
+              const { days, detail } = formatSchedule(s);
               return (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                  {ranges.map((range, j) => (
-                    <Tag key={j} color="blue" style={{ margin: 0 }}>{range}</Tag>
-                  ))}
-                  <Typography.Text strong>{s.start_time}</Typography.Text>
-                  {s.duration_min > 0 && (
-                    <Typography.Text type="secondary">{s.duration_min}min</Typography.Text>
-                  )}
-                  {s.monitor_min > 0 && (
-                    <Tag color="orange" style={{ margin: 0 }}>{s.monitor_min}min</Tag>
-                  )}
+                <div key={i}>
+                  <Tag color="blue" style={{ margin: '0 4px 2px 0' }}>{days}</Tag>
+                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>{detail}</Typography.Text>
                 </div>
               );
             })}
