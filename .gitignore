@@ -14,7 +14,7 @@ web/.vite/
 
 # Build output (dist is committed for go:embed)
 # internal/webui/dist/
-dist/
+/dist/
 
 # IDE
 .idea/

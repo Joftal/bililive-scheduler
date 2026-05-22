@@ -185,25 +185,28 @@ export default function TaskList() {
       dataIndex: 'enabled',
       width: 60,
       render: (enabled: boolean, r: ScheduleTask) => (
-        <Switch checked={enabled} onChange={() => handleToggle(r)} size="small" />
+        <Switch checked={enabled} onChange={() => handleToggle(r)} size="small" disabled={r.state === 'recording'} />
       ),
     },
     {
       title: '操作',
       width: 160,
-      render: (_: unknown, r: ScheduleTask) => (
-        <Space size="small">
-          <Button size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); navigate(`/tasks/${r.id}/edit`); }} />
-          {r.state === 'error' && (
-            <Button size="small" icon={<RedoOutlined />} onClick={(e) => { e.stopPropagation(); handleRetry(r.id); }} type="primary" danger>
-              重试
-            </Button>
-          )}
-          <Popconfirm title="确认删除此任务？" onConfirm={() => handleDelete(r.id)} onCancel={(e) => e?.stopPropagation()}>
-            <Button size="small" icon={<DeleteOutlined />} danger onClick={(e) => e.stopPropagation()} />
-          </Popconfirm>
-        </Space>
-      ),
+      render: (_: unknown, r: ScheduleTask) => {
+        const isRecording = r.state === 'recording';
+        return (
+          <Space size="small">
+            <Button size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); navigate(`/tasks/${r.id}/edit`); }} disabled={isRecording} />
+            {r.state === 'error' && (
+              <Button size="small" icon={<RedoOutlined />} onClick={(e) => { e.stopPropagation(); handleRetry(r.id); }} type="primary" danger>
+                重试
+              </Button>
+            )}
+            <Popconfirm title="确认删除此任务？" onConfirm={() => handleDelete(r.id)} onCancel={(e) => e?.stopPropagation()} disabled={isRecording}>
+              <Button size="small" icon={<DeleteOutlined />} danger onClick={(e) => e.stopPropagation()} disabled={isRecording} />
+            </Popconfirm>
+          </Space>
+        );
+      },
     },
   ];
 
