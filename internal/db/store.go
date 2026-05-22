@@ -171,9 +171,9 @@ func (s *Store) GetRecordingTasks() ([]*model.ScheduleTask, error) {
 func (s *Store) GetCounts() (total, recording, waiting, errored int, err error) {
 	err = s.db.QueryRow(`
 		SELECT COUNT(*),
-		       SUM(CASE WHEN state = 'recording' THEN 1 ELSE 0 END),
-		       SUM(CASE WHEN state IN ('pending', 'waiting') AND enabled = 1 THEN 1 ELSE 0 END),
-		       SUM(CASE WHEN state = 'error' THEN 1 ELSE 0 END)
+		       COALESCE(SUM(CASE WHEN state = 'recording' THEN 1 ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN state IN ('pending', 'waiting') AND enabled = 1 THEN 1 ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN state = 'error' THEN 1 ELSE 0 END), 0)
 		FROM schedule_tasks
 	`).Scan(&total, &recording, &waiting, &errored)
 	return
