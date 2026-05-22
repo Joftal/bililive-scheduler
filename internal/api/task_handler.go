@@ -152,8 +152,12 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 			newSchedules = []model.ScheduleEntry{}
 		}
 		if len(newSchedules) > 0 {
+			// Cannot modify schedules while recording (CurrentScheduleIdx would become invalid)
+			if task.State == model.StateRecording {
+				writeError(w, http.StatusConflict, "cannot modify schedules while task is recording")
+				return
+			}
 			task.Schedules = newSchedules
-			// Reset scheduling state when schedules change
 			if task.State == model.StateWaiting {
 				task.State = model.StatePending
 				task.NextFireAt = nil

@@ -273,22 +273,28 @@ func (e *Engine) stopTask(ctx context.Context, task *model.ScheduleTask, now tim
 	e.store.TaskMu.Lock()
 	defer e.store.TaskMu.Unlock()
 
+	// Re-read from DB to avoid stale data (API may have modified the task)
+	fresh, err := e.store.Get(task.ID)
+	if err != nil {
+		return nil // task was deleted
+	}
+
 	// Update execution history
-	execs, err := e.store.GetExecutions(task.ID, 1)
+	execs, err := e.store.GetExecutions(fresh.ID, 1)
 	if err == nil && len(execs) > 0 {
 		exec := execs[0]
 		exec.EndTime = &now
 		exec.State = model.StateCompleted
 		exec.Error = reason
 		if err := e.store.UpdateExecution(exec); err != nil {
-			log.Printf("[cron] update execution for task %d error: %v", task.ID, err)
+			log.Printf("[cron] update execution for task %d error: %v", fresh.ID, err)
 		}
 	}
 
-	task.State = model.StateCompleted
-	task.LastError = reason
-	task.CurrentScheduleIdx = -1
-	return e.store.Update(task)
+	fresh.State = model.StateCompleted
+	fresh.LastError = reason
+	fresh.CurrentScheduleIdx = -1
+	return e.store.Update(fresh)
 }
 
 func (e *Engine) rescheduleTasks(now time.Time) error {
@@ -362,13 +368,27 @@ func (e *Engine) rescheduleOneTask(task *model.ScheduleTask, now time.Time) {
 
 	case model.StateError:
 		if task.RetryCount < task.MaxRetries {
+			// Compute next fire time from schedules, then apply backoff if needed
+			nextFromSchedule, schedIdx, schedErr := nextFireTime(task, now)
 			backoff := time.Duration(1<<uint(task.RetryCount)) * time.Minute
 			if backoff > 15*time.Minute {
 				backoff = 15 * time.Minute
 			}
-			next := now.Add(backoff)
-			task.NextFireAt = &next
-			task.NextFireScheduleIdx = -1
+			backoffTime := now.Add(backoff)
+
+			if schedErr == nil && nextFromSchedule.After(backoffTime) {
+				// Schedule fire is later than backoff — use schedule time
+				task.NextFireAt = nextFromSchedule
+				task.NextFireScheduleIdx = schedIdx
+			} else if schedErr == nil {
+				// Backoff is later — use backoff time but remember the schedule idx
+				task.NextFireAt = &backoffTime
+				task.NextFireScheduleIdx = schedIdx
+			} else {
+				// No valid schedule — fall back to pure backoff
+				task.NextFireAt = &backoffTime
+				task.NextFireScheduleIdx = -1
+			}
 			task.State = model.StateWaiting
 			if err := e.store.Update(task); err != nil {
 				log.Printf("[cron] update task %d error: %v", task.ID, err)

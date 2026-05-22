@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Button, Checkbox, InputNumber, TimePicker, Space, Card, Empty } from 'antd';
+import { Button, Checkbox, InputNumber, TimePicker, Space, Card, Empty, Alert } from 'antd';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { ScheduleEntry } from '../types/task';
@@ -27,6 +27,22 @@ function generateCron(days: number[], startTime: string): string {
   const [hour, minute] = parts;
   const sortedDays = [...days].sort((a, b) => a - b);
   return `${minute} ${hour} * * ${sortedDays.join(',')}`;
+}
+
+function findDuplicateConflicts(entries: ScheduleEntry[]): string[] {
+  const warnings: string[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      if (entries[i].start_time === entries[j].start_time && entries[i].start_time) {
+        const overlap = entries[i].days.filter((d) => entries[j].days.includes(d));
+        if (overlap.length > 0) {
+          const dayNames = overlap.map((d) => DAY_OPTIONS[d].label).join('、');
+          warnings.push(`时间段 ${i + 1} 和 ${j + 1} 在 ${dayNames} 的 ${entries[i].start_time} 重复`);
+        }
+      }
+    }
+  }
+  return warnings;
 }
 
 export default function ScheduleEditor({ value = [], onChange }: Props) {
@@ -71,6 +87,22 @@ export default function ScheduleEditor({ value = [], onChange }: Props) {
           style={{ margin: '16px 0' }}
         />
       )}
+
+      {(() => {
+        const conflicts = findDuplicateConflicts(entries);
+        if (conflicts.length > 0) {
+          return (
+            <Alert
+              type="warning"
+              showIcon
+              message="存在重复时间段"
+              description={conflicts.join('；')}
+              style={{ marginBottom: 12 }}
+            />
+          );
+        }
+        return null;
+      })()}
 
       {entries.map((entry, index) => (
         <Card
