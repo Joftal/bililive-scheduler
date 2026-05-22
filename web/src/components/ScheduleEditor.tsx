@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Button, Checkbox, InputNumber, TimePicker, Space, Card, Empty, Alert } from 'antd';
+import { Button, Checkbox, InputNumber, TimePicker, Card, Empty, Alert } from 'antd';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { ScheduleEntry } from '../types/task';
@@ -152,35 +152,31 @@ export default function ScheduleEditor({ value = [], onChange }: Props) {
             </div>
             <div className="entry-field">
               <div className="field-label">录制时长</div>
-              <Space>
-                <InputNumber
-                  min={0}
-                  max={1440}
-                  value={entry.duration_min}
-                  onChange={(v) => updateEntry(index, { duration_min: v ?? 0 })}
-                  addonAfter="分钟"
-                  style={{ width: 140 }}
-                />
-                <span className="duration-hint">
-                  {entry.duration_min === 0 ? '直到直播结束' : ''}
-                </span>
-              </Space>
+              <InputNumber
+                min={0}
+                max={1440}
+                value={entry.duration_min}
+                onChange={(v) => updateEntry(index, { duration_min: v ?? 0 })}
+                addonAfter="分钟"
+                style={{ width: 140 }}
+              />
+              <span className="duration-hint">
+                {entry.duration_min === 0 ? '直到直播结束' : ''}
+              </span>
             </div>
             <div className="entry-field">
               <div className="field-label">监控时长</div>
-              <Space>
-                <InputNumber
-                  min={0}
-                  max={1440}
-                  value={entry.monitor_min}
-                  onChange={(v) => updateEntry(index, { monitor_min: v ?? 0 })}
-                  addonAfter="分钟"
-                  style={{ width: 140 }}
-                />
-                <span className="duration-hint">
-                  {entry.monitor_min === 0 ? '不监控' : `开播后${entry.monitor_min}分钟内触发`}
-                </span>
-              </Space>
+              <InputNumber
+                min={0}
+                max={1440}
+                value={entry.monitor_min}
+                onChange={(v) => updateEntry(index, { monitor_min: v ?? 0 })}
+                addonAfter="分钟"
+                style={{ width: 140 }}
+              />
+              <span className="duration-hint">
+                {entry.monitor_min === 0 ? '不监控' : `${entry.monitor_min}分钟内`}
+              </span>
             </div>
           </div>
         </Card>
