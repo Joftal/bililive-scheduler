@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Table, Button, Space, Popconfirm, message, Typography, Switch, Tooltip } from 'antd';
+import { Table, Button, Space, Popconfirm, message, Typography, Switch, Tooltip, Tag } from 'antd';
 import {
   PlusOutlined, DeleteOutlined, EditOutlined, ReloadOutlined,
   RedoOutlined,
@@ -7,15 +7,15 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import StatusBadge from '../components/StatusBadge';
-import type { ScheduleTask, ScheduleEntry, TaskExecution, RoomInfo } from '../types/task';
+import type { ScheduleTask, TaskExecution, RoomInfo } from '../types/task';
 import dayjs from 'dayjs';
 
 const DAY_NAMES: Record<number, string> = {
   1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六', 7: '日',
 };
 
-function formatDays(days: number[]): string {
-  if (days.length === 0) return '';
+function formatDayRanges(days: number[]): string[] {
+  if (days.length === 0) return [];
   const sorted = [...days].sort((a, b) => a - b);
   const ranges: string[] = [];
   let start = sorted[0];
@@ -24,22 +24,13 @@ function formatDays(days: number[]): string {
     if (sorted[i] === end + 1) {
       end = sorted[i];
     } else {
-      ranges.push(start === end ? `周${DAY_NAMES[start]}` : `周${DAY_NAMES[start]}-${DAY_NAMES[end]}`);
+      ranges.push(start === end ? DAY_NAMES[start] : `${DAY_NAMES[start]}-${DAY_NAMES[end]}`);
       start = sorted[i];
       end = sorted[i];
     }
   }
-  ranges.push(start === end ? `周${DAY_NAMES[start]}` : `周${DAY_NAMES[start]}-${DAY_NAMES[end]}`);
-  return ranges.join(' ');
-}
-
-function formatScheduleSummary(schedules: ScheduleEntry[]): string {
-  return schedules.map((s) => {
-    const days = formatDays(s.days);
-    const duration = s.duration_min > 0 ? ` ${s.duration_min}min` : '';
-    const monitor = s.monitor_min > 0 ? ` [监控${s.monitor_min}min]` : '';
-    return `${days} ${s.start_time}${duration}${monitor}`;
-  }).join(' / ');
+  ranges.push(start === end ? DAY_NAMES[start] : `${DAY_NAMES[start]}-${DAY_NAMES[end]}`);
+  return ranges;
 }
 
 export default function TaskList() {
@@ -150,11 +141,28 @@ export default function TaskList() {
     {
       title: '录制计划',
       render: (_: unknown, r: ScheduleTask) => {
-        const summary = formatScheduleSummary(r.schedules || []);
+        const schedules = r.schedules || [];
+        if (schedules.length === 0) return <Typography.Text type="secondary">-</Typography.Text>;
         return (
-          <Tooltip title={summary}>
-            <Typography.Text style={{ maxWidth: 280 }} ellipsis>{summary}</Typography.Text>
-          </Tooltip>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {schedules.map((s, i) => {
+              const ranges = formatDayRanges(s.days);
+              return (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                  {ranges.map((range, j) => (
+                    <Tag key={j} color="blue" style={{ margin: 0 }}>{range}</Tag>
+                  ))}
+                  <Typography.Text strong>{s.start_time}</Typography.Text>
+                  {s.duration_min > 0 && (
+                    <Typography.Text type="secondary">{s.duration_min}min</Typography.Text>
+                  )}
+                  {s.monitor_min > 0 && (
+                    <Tag color="orange" style={{ margin: 0 }}>{s.monitor_min}min</Tag>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         );
       },
     },
