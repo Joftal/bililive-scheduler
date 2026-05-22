@@ -3,9 +3,11 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -82,6 +84,11 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	task := req.ToTask()
 	if err := task.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if conflict := s.findScheduleConflict(task.RoomID, task.Schedules, 0); conflict != "" {
+		writeError(w, http.StatusConflict, conflict)
 		return
 	}
 
@@ -169,6 +176,13 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 	if err := task.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	if req.Schedules != nil {
+		if conflict := s.findScheduleConflict(task.RoomID, task.Schedules, task.ID); conflict != "" {
+			writeError(w, http.StatusConflict, conflict)
+			return
+		}
 	}
 
 	if err := s.store.Update(task); err != nil {
@@ -402,6 +416,59 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 func parseID(r *http.Request) (int64, error) {
 	vars := mux.Vars(r)
 	return strconv.ParseInt(vars["id"], 10, 64)
+}
+
+// findScheduleConflict checks if any existing task for the same room has overlapping schedules.
+// excludeID is the task ID to skip (0 for create, task.ID for update).
+// Returns a human-readable conflict message, or "" if no conflict.
+func (s *Server) findScheduleConflict(roomID string, schedules []model.ScheduleEntry, excludeID int64) string {
+	existing, err := s.store.List("", nil)
+	if err != nil {
+		return "" // can't check, allow through
+	}
+
+	for _, other := range existing {
+		if other.ID == excludeID || other.RoomID != roomID {
+			continue
+		}
+		for _, newEntry := range schedules {
+			if newEntry.StartTime == "" {
+				continue
+			}
+			for _, oldEntry := range other.Schedules {
+				if oldEntry.StartTime == "" {
+					continue
+				}
+				if newEntry.StartTime != oldEntry.StartTime {
+					continue
+				}
+				overlap := dayOverlap(newEntry.Days, oldEntry.Days)
+				if len(overlap) > 0 {
+					dayNames := make([]string, len(overlap))
+					for i, d := range overlap {
+						dayNames[i] = []string{"日", "一", "二", "三", "四", "五", "六"}[d]
+					}
+					return fmt.Sprintf("与任务 #%d 在周%s的 %s 时间冲突",
+						other.ID, strings.Join(dayNames, "、"), newEntry.StartTime)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func dayOverlap(a, b []int) []int {
+	set := make(map[int]bool)
+	for _, d := range a {
+		set[d] = true
+	}
+	var result []int
+	for _, d := range b {
+		if set[d] {
+			result = append(result, d)
+		}
+	}
+	return result
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
