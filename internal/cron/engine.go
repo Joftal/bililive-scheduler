@@ -158,11 +158,12 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 
 	if !isLive {
 		log.Printf("[cron] task %d: room %s is not live, skipping", task.ID, task.RoomID)
-		next, err := NextAfter(fresh.CronExpr, now)
+		next, schedIdx, err := nextFireTime(fresh, now)
 		if err != nil {
 			return fmt.Errorf("compute next fire: %w", err)
 		}
 		fresh.NextFireAt = next
+		fresh.NextFireScheduleIdx = schedIdx
 		fresh.State = model.StateWaiting
 		return e.store.Update(fresh)
 	}
@@ -171,6 +172,10 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 		log.Printf("[cron] task %d: room %s is already recording", task.ID, task.RoomID)
 		fresh.State = model.StateRecording
 		fresh.LastError = ""
+		// Set CurrentScheduleIdx from NextFireScheduleIdx
+		if len(fresh.Schedules) > 0 {
+			fresh.CurrentScheduleIdx = fresh.NextFireScheduleIdx
+		}
 		return e.store.Update(fresh)
 	}
 
@@ -194,6 +199,10 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 	fresh.CurrentLiveStart = &now
 	fresh.LastError = ""
 	fresh.RetryCount = 0
+	// Set CurrentScheduleIdx from NextFireScheduleIdx
+	if len(fresh.Schedules) > 0 {
+		fresh.CurrentScheduleIdx = fresh.NextFireScheduleIdx
+	}
 	return e.store.Update(fresh)
 }
 
@@ -218,10 +227,11 @@ func (e *Engine) checkRecording(ctx context.Context, task *model.ScheduleTask, n
 		return e.stopTask(ctx, task, now, "task disabled")
 	}
 
-	// Check duration limit
-	if task.DurationMinutes > 0 && task.CurrentLiveStart != nil {
+	// Check duration limit using effective duration (per-schedule or legacy)
+	duration := task.GetEffectiveDuration(task.CurrentScheduleIdx)
+	if duration > 0 && task.CurrentLiveStart != nil {
 		elapsed := now.Sub(*task.CurrentLiveStart)
-		limit := time.Duration(task.DurationMinutes) * time.Minute
+		limit := time.Duration(duration) * time.Minute
 		if elapsed >= limit {
 			log.Printf("[cron] task %d: duration limit reached (%s >= %s), stopping", task.ID, elapsed, limit)
 			return e.stopTask(ctx, task, now, "duration limit reached")
@@ -265,6 +275,7 @@ func (e *Engine) stopTask(ctx context.Context, task *model.ScheduleTask, now tim
 
 	task.State = model.StateCompleted
 	task.LastError = reason
+	task.CurrentScheduleIdx = -1
 	return e.store.Update(task)
 }
 
@@ -290,35 +301,38 @@ func (e *Engine) rescheduleTasks(now time.Time) error {
 func (e *Engine) rescheduleOneTask(task *model.ScheduleTask, now time.Time) {
 	switch task.State {
 	case model.StateCompleted:
-		next, err := NextAfter(task.CronExpr, now)
+		next, schedIdx, err := nextFireTime(task, now)
 		if err != nil {
-			log.Printf("[cron] task %d: invalid cron expr %q: %v", task.ID, task.CronExpr, err)
+			log.Printf("[cron] task %d: compute next fire: %v", task.ID, err)
 			task.State = model.StateError
-			task.LastError = fmt.Sprintf("invalid cron: %v", err)
+			task.LastError = fmt.Sprintf("invalid schedule: %v", err)
 			if err := e.store.Update(task); err != nil {
 				log.Printf("[cron] update task %d error: %v", task.ID, err)
 			}
 			return
 		}
 		task.NextFireAt = next
+		task.NextFireScheduleIdx = schedIdx
 		task.State = model.StateWaiting
 		task.CurrentLiveStart = nil
+		task.CurrentScheduleIdx = -1
 		task.RetryCount = 0
 		if err := e.store.Update(task); err != nil {
 			log.Printf("[cron] update task %d error: %v", task.ID, err)
 		}
 
 	case model.StatePending:
-		next, err := NextAfter(task.CronExpr, now)
+		next, schedIdx, err := nextFireTime(task, now)
 		if err != nil {
 			task.State = model.StateError
-			task.LastError = fmt.Sprintf("invalid cron: %v", err)
+			task.LastError = fmt.Sprintf("invalid schedule: %v", err)
 			if err := e.store.Update(task); err != nil {
 				log.Printf("[cron] update task %d error: %v", task.ID, err)
 			}
 			return
 		}
 		task.NextFireAt = next
+		task.NextFireScheduleIdx = schedIdx
 		task.State = model.StateWaiting
 		if err := e.store.Update(task); err != nil {
 			log.Printf("[cron] update task %d error: %v", task.ID, err)
@@ -332,10 +346,25 @@ func (e *Engine) rescheduleOneTask(task *model.ScheduleTask, now time.Time) {
 			}
 			next := now.Add(backoff)
 			task.NextFireAt = &next
+			task.NextFireScheduleIdx = -1
 			task.State = model.StateWaiting
 			if err := e.store.Update(task); err != nil {
 				log.Printf("[cron] update task %d error: %v", task.ID, err)
 			}
 		}
 	}
+}
+
+// nextFireTime computes the next fire time for a task.
+// For multi-schedule tasks, it finds the earliest across all entries.
+// For legacy tasks, it uses the single CronExpr.
+func nextFireTime(task *model.ScheduleTask, from time.Time) (*time.Time, int, error) {
+	if len(task.Schedules) > 0 {
+		return NextScheduleAfter(task.Schedules, from)
+	}
+	next, err := NextAfter(task.CronExpr, from)
+	if err != nil {
+		return nil, -1, err
+	}
+	return next, -1, nil
 }

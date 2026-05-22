@@ -1,0 +1,77 @@
+.schedule-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.schedule-entry-card {
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+}
+
+.schedule-entry-card .ant-card-head {
+  min-height: auto;
+  padding: 8px 16px;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.schedule-entry-card .ant-card-head-title {
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.schedule-entry-card .ant-card-extra {
+  padding: 0;
+}
+
+.schedule-entry-card .ant-card-body {
+  padding: 12px 16px;
+}
+
+.entry-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cron-preview {
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(0, 0, 0, 0.45);
+  background: #f5f5f5;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
+.entry-row {
+  margin-bottom: 8px;
+}
+
+.entry-row:last-child {
+  margin-bottom: 0;
+}
+
+.entry-row-inline {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.entry-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field-label {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.duration-hint {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}

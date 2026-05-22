@@ -1,5 +1,12 @@
 export type TaskState = 'pending' | 'waiting' | 'recording' | 'completed' | 'error';
 
+export interface ScheduleEntry {
+  days: number[];        // 0=Sun, 1=Mon, ..., 6=Sat
+  start_time: string;    // "HH:MM"
+  duration_min: number;  // 0 = until stream ends
+  cron_expr: string;     // auto-generated, read-only
+}
+
 export interface ScheduleTask {
   id: number;
   name: string;
@@ -16,15 +23,19 @@ export interface ScheduleTask {
   max_retries: number;
   created_at: string;
   updated_at: string;
+  schedules: ScheduleEntry[];
+  current_schedule_idx: number;
+  next_fire_schedule_idx: number;
 }
 
 export interface CreateTaskRequest {
   name: string;
   room_id: string;
   room_url: string;
-  cron_expr: string;
-  duration_min: number;
+  cron_expr?: string;
+  duration_min?: number;
   max_retries: number;
+  schedules?: ScheduleEntry[];
 }
 
 export interface UpdateTaskRequest {
@@ -32,6 +43,7 @@ export interface UpdateTaskRequest {
   cron_expr?: string;
   duration_min?: number;
   max_retries?: number;
+  schedules?: ScheduleEntry[];
 }
 
 export interface SchedulerStatus {

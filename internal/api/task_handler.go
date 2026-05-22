@@ -156,6 +156,18 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 	if req.MaxRetries != nil {
 		task.MaxRetries = *req.MaxRetries
 	}
+	if req.Schedules != nil {
+		task.Schedules = *req.Schedules
+		if task.Schedules == nil {
+			task.Schedules = []model.ScheduleEntry{}
+		}
+		// Reset scheduling state when schedules change
+		if task.State == model.StateWaiting {
+			task.State = model.StatePending
+			task.NextFireAt = nil
+			task.NextFireScheduleIdx = -1
+		}
+	}
 
 	if err := task.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -23,12 +24,22 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
+const taskColumns = `id, name, room_id, room_url, cron_expr, duration_min, enabled, state,
+                     next_fire_at, current_live_start, last_error, retry_count, max_retries,
+                     created_at, updated_at, schedules, current_schedule_idx, next_fire_schedule_idx`
+
 func (s *Store) Create(t *model.ScheduleTask) error {
+	schedulesJSON, err := json.Marshal(t.Schedules)
+	if err != nil {
+		return fmt.Errorf("marshal schedules: %w", err)
+	}
 	result, err := s.db.Exec(
-		`INSERT INTO schedule_tasks (name, room_id, room_url, cron_expr, duration_min, enabled, state, max_retries, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO schedule_tasks (name, room_id, room_url, cron_expr, duration_min, enabled, state,
+		  max_retries, created_at, updated_at, schedules, current_schedule_idx, next_fire_schedule_idx)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.Name, t.RoomID, t.RoomURL, t.CronExpr, t.DurationMinutes,
 		boolToInt(t.Enabled), string(t.State), t.MaxRetries, t.CreatedAt, t.UpdatedAt,
+		string(schedulesJSON), t.CurrentScheduleIdx, t.NextFireScheduleIdx,
 	)
 	if err != nil {
 		return fmt.Errorf("insert task: %w", err)
@@ -43,10 +54,7 @@ func (s *Store) Create(t *model.ScheduleTask) error {
 
 func (s *Store) Get(id int64) (*model.ScheduleTask, error) {
 	row := s.db.QueryRow(
-		`SELECT id, name, room_id, room_url, cron_expr, duration_min, enabled, state,
-		        next_fire_at, current_live_start, last_error, retry_count, max_retries,
-		        created_at, updated_at
-		 FROM schedule_tasks WHERE id = ?`, id,
+		`SELECT `+taskColumns+` FROM schedule_tasks WHERE id = ?`, id,
 	)
 	t, err := scanTask(row)
 	if err != nil {
@@ -59,10 +67,7 @@ func (s *Store) Get(id int64) (*model.ScheduleTask, error) {
 }
 
 func (s *Store) List(state string, enabled *bool) ([]*model.ScheduleTask, error) {
-	query := `SELECT id, name, room_id, room_url, cron_expr, duration_min, enabled, state,
-	                 next_fire_at, current_live_start, last_error, retry_count, max_retries,
-	                 created_at, updated_at
-	          FROM schedule_tasks WHERE 1=1`
+	query := `SELECT ` + taskColumns + ` FROM schedule_tasks WHERE 1=1`
 	args := []any{}
 
 	if state != "" {
@@ -95,15 +100,21 @@ func (s *Store) List(state string, enabled *bool) ([]*model.ScheduleTask, error)
 
 func (s *Store) Update(t *model.ScheduleTask) error {
 	t.UpdatedAt = time.Now()
-	_, err := s.db.Exec(
+	schedulesJSON, err := json.Marshal(t.Schedules)
+	if err != nil {
+		return fmt.Errorf("marshal schedules: %w", err)
+	}
+	_, err = s.db.Exec(
 		`UPDATE schedule_tasks SET
 			name = ?, room_id = ?, room_url = ?, cron_expr = ?, duration_min = ?,
 			enabled = ?, state = ?, next_fire_at = ?, current_live_start = ?,
-			last_error = ?, retry_count = ?, max_retries = ?, updated_at = ?
+			last_error = ?, retry_count = ?, max_retries = ?, updated_at = ?,
+			schedules = ?, current_schedule_idx = ?, next_fire_schedule_idx = ?
 		 WHERE id = ?`,
 		t.Name, t.RoomID, t.RoomURL, t.CronExpr, t.DurationMinutes,
 		boolToInt(t.Enabled), string(t.State), t.NextFireAt, t.CurrentLiveStart,
-		t.LastError, t.RetryCount, t.MaxRetries, t.UpdatedAt, t.ID,
+		t.LastError, t.RetryCount, t.MaxRetries, t.UpdatedAt,
+		string(schedulesJSON), t.CurrentScheduleIdx, t.NextFireScheduleIdx, t.ID,
 	)
 	return err
 }
@@ -115,9 +126,7 @@ func (s *Store) Delete(id int64) error {
 
 func (s *Store) GetDueTasks(now time.Time) ([]*model.ScheduleTask, error) {
 	rows, err := s.db.Query(
-		`SELECT id, name, room_id, room_url, cron_expr, duration_min, enabled, state,
-		        next_fire_at, current_live_start, last_error, retry_count, max_retries,
-		        created_at, updated_at
+		`SELECT `+taskColumns+`
 		 FROM schedule_tasks
 		 WHERE enabled = 1 AND state IN ('pending', 'waiting') AND (next_fire_at IS NULL OR next_fire_at <= ?)
 		 ORDER BY next_fire_at ASC`, now,
@@ -141,9 +150,7 @@ func (s *Store) GetDueTasks(now time.Time) ([]*model.ScheduleTask, error) {
 func (s *Store) GetRecordingTasks() ([]*model.ScheduleTask, error) {
 	// Include disabled tasks that are still recording - they need cleanup
 	rows, err := s.db.Query(
-		`SELECT id, name, room_id, room_url, cron_expr, duration_min, enabled, state,
-		        next_fire_at, current_live_start, last_error, retry_count, max_retries,
-		        created_at, updated_at
+		`SELECT `+taskColumns+`
 		 FROM schedule_tasks WHERE state = 'recording' ORDER BY id ASC`,
 	)
 	if err != nil {
@@ -238,16 +245,19 @@ func scanTask(row *sql.Row) (*model.ScheduleTask, error) {
 	var state string
 	var enabled int
 	var lastError sql.NullString
+	var schedulesStr sql.NullString
 	if err := row.Scan(
 		&t.ID, &t.Name, &t.RoomID, &t.RoomURL, &t.CronExpr, &t.DurationMinutes,
 		&enabled, &state, &t.NextFireAt, &t.CurrentLiveStart,
 		&lastError, &t.RetryCount, &t.MaxRetries, &t.CreatedAt, &t.UpdatedAt,
+		&schedulesStr, &t.CurrentScheduleIdx, &t.NextFireScheduleIdx,
 	); err != nil {
 		return nil, fmt.Errorf("scan task: %w", err)
 	}
 	t.Enabled = enabled != 0
 	t.State = model.TaskState(state)
 	t.LastError = lastError.String
+	t.Schedules = parseSchedules(schedulesStr.String)
 	return t, nil
 }
 
@@ -256,17 +266,34 @@ func scanTaskRows(rows *sql.Rows) (*model.ScheduleTask, error) {
 	var state string
 	var enabled int
 	var lastError sql.NullString
+	var schedulesStr sql.NullString
 	if err := rows.Scan(
 		&t.ID, &t.Name, &t.RoomID, &t.RoomURL, &t.CronExpr, &t.DurationMinutes,
 		&enabled, &state, &t.NextFireAt, &t.CurrentLiveStart,
 		&lastError, &t.RetryCount, &t.MaxRetries, &t.CreatedAt, &t.UpdatedAt,
+		&schedulesStr, &t.CurrentScheduleIdx, &t.NextFireScheduleIdx,
 	); err != nil {
 		return nil, fmt.Errorf("scan task: %w", err)
 	}
 	t.Enabled = enabled != 0
 	t.State = model.TaskState(state)
 	t.LastError = lastError.String
+	t.Schedules = parseSchedules(schedulesStr.String)
 	return t, nil
+}
+
+func parseSchedules(s string) []model.ScheduleEntry {
+	if s == "" || s == "null" {
+		return []model.ScheduleEntry{}
+	}
+	var entries []model.ScheduleEntry
+	if err := json.Unmarshal([]byte(s), &entries); err != nil {
+		return []model.ScheduleEntry{}
+	}
+	if entries == nil {
+		return []model.ScheduleEntry{}
+	}
+	return entries
 }
 
 func boolToInt(b bool) int {

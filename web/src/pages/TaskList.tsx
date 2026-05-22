@@ -7,8 +7,38 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import StatusBadge from '../components/StatusBadge';
-import type { ScheduleTask, TaskExecution } from '../types/task';
+import type { ScheduleTask, ScheduleEntry, TaskExecution } from '../types/task';
 import dayjs from 'dayjs';
+
+const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
+
+function formatDays(days: number[]): string {
+  if (days.length === 0) return '';
+  const sorted = [...days].sort((a, b) => a - b);
+  // Try to find consecutive ranges
+  const ranges: string[] = [];
+  let start = sorted[0];
+  let end = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] === end + 1) {
+      end = sorted[i];
+    } else {
+      ranges.push(start === end ? `周${DAY_NAMES[start]}` : `周${DAY_NAMES[start]}-${DAY_NAMES[end]}`);
+      start = sorted[i];
+      end = sorted[i];
+    }
+  }
+  ranges.push(start === end ? `周${DAY_NAMES[start]}` : `周${DAY_NAMES[start]}-${DAY_NAMES[end]}`);
+  return ranges.join(' ');
+}
+
+function formatScheduleSummary(schedules: ScheduleEntry[]): string {
+  return schedules.map((s) => {
+    const days = formatDays(s.days);
+    const duration = s.duration_min > 0 ? ` (${s.duration_min}min)` : '';
+    return `${days} ${s.start_time}${duration}`;
+  }).join(' / ');
+}
 
 export default function TaskList() {
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
@@ -89,15 +119,28 @@ export default function TaskList() {
       ),
     },
     {
-      title: 'Cron',
-      dataIndex: 'cron_expr',
-      render: (expr: string) => <Tag>{expr}</Tag>,
+      title: '录制计划',
+      render: (_: unknown, r: ScheduleTask) => {
+        if (r.schedules && r.schedules.length > 0) {
+          const summary = formatScheduleSummary(r.schedules);
+          return (
+            <Tooltip title={summary}>
+              <Typography.Text style={{ maxWidth: 280 }} ellipsis>{summary}</Typography.Text>
+            </Tooltip>
+          );
+        }
+        return <Tag>{r.cron_expr}</Tag>;
+      },
     },
     {
       title: '时长',
-      dataIndex: 'duration_min',
-      width: 80,
-      render: (m: number) => m > 0 ? `${m}分钟` : '直到结束',
+      width: 90,
+      render: (_: unknown, r: ScheduleTask) => {
+        if (r.schedules && r.schedules.length > 0) {
+          return <Tag color="blue">按时间段</Tag>;
+        }
+        return r.duration_min > 0 ? `${r.duration_min}分钟` : '直到结束';
+      },
     },
     {
       title: '状态',
@@ -160,7 +203,7 @@ export default function TaskList() {
         loading={loading}
         pagination={false}
         size="middle"
-        expandable={{
+   expandable={{
           expandedRowRender: (r) => r.last_error ? (
             <Typography.Text type="danger">错误信息: {r.last_error} (重试 {r.retry_count}/{r.max_retries})</Typography.Text>
           ) : <Typography.Text type="secondary">无错误信息</Typography.Text>,

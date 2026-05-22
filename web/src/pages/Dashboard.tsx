@@ -119,8 +119,9 @@ export default function Dashboard() {
             </div>
             <div className="panel-body">
               <ul className="help-list">
-                <li><strong>Cron 表达式</strong>: 标准 5 段格式 <code>分 时 日 月 周</code>，例如 <code>0 20 * * 1-5</code> 表示工作日每天 20:00</li>
-                <li><strong>录制时长</strong>: 设置为 0 表示录制直到直播结束，正数表示录制指定分钟后自动停止</li>
+                <li><strong>录制计划</strong>: 可视化设置录制时间段，选择星期、开始时间和时长，支持同一天多段录制</li>
+                <li><strong>录制时长</strong>: 每个时间段可独立设置，0 表示录制直到直播结束，正数表示指定分钟后自动停止</li>
+                <li><strong>Cron 表达式</strong>: 高级模式，标准 5 段格式 <code>分 时 日 月 周</code>，例如 <code>0 20 * * 1-5</code></li>
                 <li><strong>自动重试</strong>: 任务失败后自动重试（指数退避），超过最大重试次数后进入错误状态</li>
               </ul>
             </div>

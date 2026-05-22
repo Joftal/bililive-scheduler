@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Form, Input, InputNumber, Button, Card, Space, message, Divider, Typography } from 'antd';
+import { Form, Input, InputNumber, Button, Card, Space, message, Typography } from 'antd';
+import { SwapOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../services/api';
 import CronInput from '../components/CronInput';
+import ScheduleEditor from '../components/ScheduleEditor';
 import RoomSelector from '../components/RoomSelector';
-import type { CreateTaskRequest, RoomInfo } from '../types/task';
+import type { CreateTaskRequest, RoomInfo, ScheduleEntry } from '../types/task';
 
 export default function TaskForm() {
   const { id } = useParams<{ id: string }>();
@@ -15,6 +17,8 @@ export default function TaskForm() {
   const [saving, setSaving] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<RoomInfo | null>(null);
   const [taskData, setTaskData] = useState<{ room_url?: string; room_id?: string } | null>(null);
+  const [useScheduleEditor, setUseScheduleEditor] = useState(true);
+  const [schedules, setSchedules] = useState<ScheduleEntry[]>([]);
 
   useEffect(() => {
     if (isEdit) {
@@ -22,11 +26,19 @@ export default function TaskForm() {
       api.getTask(Number(id))
         .then((task) => {
           setTaskData({ room_url: task.room_url, room_id: task.room_id });
+          const hasSchedules = task.schedules && task.schedules.length > 0;
+          setUseScheduleEditor(hasSchedules);
+          if (hasSchedules) {
+            setSchedules(task.schedules);
+          } else {
+            form.setFieldsValue({
+              cron_expr: task.cron_expr,
+              duration_min: task.duration_min,
+            });
+          }
           form.setFieldsValue({
             name: task.name,
             room_id: task.room_id,
-            cron_expr: task.cron_expr,
-            duration_min: task.duration_min,
             max_retries: task.max_retries,
           });
         })
@@ -42,18 +54,32 @@ export default function TaskForm() {
     setSaving(true);
     try {
       if (isEdit) {
-        await api.updateTask(Number(id), {
+        const payload: Record<string, unknown> = {
           name: values.name,
-          cron_expr: values.cron_expr,
-          duration_min: values.duration_min,
           max_retries: values.max_retries,
-        });
+        };
+        if (useScheduleEditor) {
+          payload.schedules = schedules;
+        } else {
+          payload.cron_expr = values.cron_expr;
+          payload.duration_min = values.duration_min;
+        }
+        await api.updateTask(Number(id), payload);
         message.success('任务已更新');
       } else {
-        await api.createTask({
-          ...values,
+        const payload: CreateTaskRequest = {
+          name: values.name,
+          room_id: values.room_id,
           room_url: selectedRoom?.url || '',
-        });
+          max_retries: values.max_retries,
+        };
+        if (useScheduleEditor) {
+          payload.schedules = schedules;
+        } else {
+          payload.cron_expr = values.cron_expr;
+          payload.duration_min = values.duration_min;
+        }
+        await api.createTask(payload);
         message.success('任务已创建');
       }
       navigate('/tasks');
@@ -62,6 +88,10 @@ export default function TaskForm() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const toggleMode = () => {
+    setUseScheduleEditor(!useScheduleEditor);
   };
 
   return (
@@ -74,7 +104,7 @@ export default function TaskForm() {
         form={form}
         layout="vertical"
         onFinish={handleSubmit}
-        initialValues={{ duration_min: 0, max_retries: 3 }}
+        initialValues={{ max_retries: 3, duration_min: 0 }}
       >
         <Form.Item label="任务名称" name="name">
           <Input placeholder="可选，便于识别的名称" />
@@ -100,28 +130,66 @@ export default function TaskForm() {
           </Form.Item>
         )}
 
-        <Form.Item
-          label="Cron 表达式"
-          name="cron_expr"
-          rules={[{ required: true, message: '请输入 cron 表达式' }]}
-        >
-          <CronInput />
-        </Form.Item>
+        {useScheduleEditor ? (
+          <Form.Item
+            label="录制计划"
+            required
+            rules={[
+              {
+                validator: () => {
+                  if (schedules.length === 0) {
+                    return Promise.reject('请至少添加一个时间段');
+                  }
+                  for (let i = 0; i < schedules.length; i++) {
+                    if (schedules[i].days.length === 0) {
+                      return Promise.reject(`时间段 ${i + 1}: 请至少选择一天`);
+                    }
+                    if (!schedules[i].start_time) {
+                      return Promise.reject(`时间段 ${i + 1}: 请设置开始时间`);
+                    }
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
+          >
+            <ScheduleEditor value={schedules} onChange={setSchedules} />
+          </Form.Item>
+        ) : (
+          <>
+            <Form.Item
+              label="Cron 表达式"
+              name="cron_expr"
+              rules={[{ required: true, message: '请输入 cron 表达式' }]}
+            >
+              <CronInput />
+            </Form.Item>
 
-        <Divider />
+            <Form.Item
+              label="录制时长（分钟）"
+              name="duration_min"
+              tooltip="设置为 0 表示录制直到直播结束，设置为正数表示录制指定分钟后自动停止"
+            >
+              <InputNumber
+                min={0}
+                max={1440}
+                addonAfter="分钟"
+                style={{ width: '100%' }}
+                placeholder="0 = 直到直播结束"
+              />
+            </Form.Item>
+          </>
+        )}
 
-        <Form.Item
-          label="录制时长（分钟）"
-          name="duration_min"
-          tooltip="设置为 0 表示录制直到直播结束，设置为正数表示录制指定分钟后自动停止"
-        >
-          <InputNumber
-            min={0}
-            max={1440}
-            addonAfter="分钟"
-            style={{ width: '100%' }}
-            placeholder="0 = 直到直播结束"
-          />
+        <Form.Item>
+          <Button
+            type="link"
+            icon={<SwapOutlined />}
+            onClick={toggleMode}
+            style={{ padding: 0, marginBottom: 8 }}
+          >
+            {useScheduleEditor ? '切换到 Cron 表达式模式' : '切换到可视化计划模式'}
+          </Button>
         </Form.Item>
 
         <Form.Item

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -78,5 +79,29 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("execute migration: %w", err)
 		}
 	}
+
+	// Incremental migrations for existing databases
+	alterMigrations := []string{
+		`ALTER TABLE schedule_tasks ADD COLUMN schedules TEXT DEFAULT '[]'`,
+		`ALTER TABLE schedule_tasks ADD COLUMN current_schedule_idx INTEGER DEFAULT -1`,
+		`ALTER TABLE schedule_tasks ADD COLUMN next_fire_schedule_idx INTEGER DEFAULT -1`,
+	}
+	for _, m := range alterMigrations {
+		if _, err := db.Exec(m); err != nil {
+			// Ignore "duplicate column" errors for idempotency
+			if !isDuplicateColumnError(err) {
+				return fmt.Errorf("execute alter migration: %w", err)
+			}
+		}
+	}
+
 	return nil
+}
+
+func isDuplicateColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists")
 }
