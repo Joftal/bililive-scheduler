@@ -227,15 +227,27 @@ func (e *Engine) checkRecording(ctx context.Context, task *model.ScheduleTask, n
 		return e.stopTask(ctx, task, now, "task disabled")
 	}
 
-	// Check duration limit using effective duration (per-schedule or legacy)
-	duration := task.GetEffectiveDuration(task.CurrentScheduleIdx)
-	if duration > 0 && task.CurrentLiveStart != nil {
-		elapsed := now.Sub(*task.CurrentLiveStart)
+	// Check duration limit under lock to avoid race with fireTask modifying CurrentScheduleIdx
+	e.store.TaskMu.Lock()
+	fresh, err := e.store.Get(task.ID)
+	if err != nil {
+		e.store.TaskMu.Unlock()
+		return nil // task was deleted
+	}
+	duration := fresh.GetEffectiveDuration(fresh.CurrentScheduleIdx)
+	limitReached := false
+	if duration > 0 && fresh.CurrentLiveStart != nil {
+		elapsed := now.Sub(*fresh.CurrentLiveStart)
 		limit := time.Duration(duration) * time.Minute
 		if elapsed >= limit {
 			log.Printf("[cron] task %d: duration limit reached (%s >= %s), stopping", task.ID, elapsed, limit)
-			return e.stopTask(ctx, task, now, "duration limit reached")
+			limitReached = true
 		}
+	}
+	e.store.TaskMu.Unlock()
+
+	if limitReached {
+		return e.stopTask(ctx, task, now, "duration limit reached")
 	}
 
 	// Check if stream ended
@@ -292,7 +304,17 @@ func (e *Engine) rescheduleTasks(now time.Time) error {
 		}
 
 		e.store.TaskMu.Lock()
-		e.rescheduleOneTask(task, now)
+		// Re-read from DB to get fresh state (fireTask or API may have changed it)
+		fresh, err := e.store.Get(task.ID)
+		if err != nil {
+			e.store.TaskMu.Unlock()
+			continue // task was deleted
+		}
+		if !fresh.Enabled {
+			e.store.TaskMu.Unlock()
+			continue
+		}
+		e.rescheduleOneTask(fresh, now)
 		e.store.TaskMu.Unlock()
 	}
 	return nil

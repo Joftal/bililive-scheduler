@@ -157,15 +157,21 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 		task.MaxRetries = *req.MaxRetries
 	}
 	if req.Schedules != nil {
-		task.Schedules = *req.Schedules
-		if task.Schedules == nil {
-			task.Schedules = []model.ScheduleEntry{}
+		newSchedules := *req.Schedules
+		if newSchedules == nil {
+			newSchedules = []model.ScheduleEntry{}
 		}
-		// Reset scheduling state when schedules change
-		if task.State == model.StateWaiting {
-			task.State = model.StatePending
-			task.NextFireAt = nil
-			task.NextFireScheduleIdx = -1
+		// Only update if the request actually provides entries, or if the task
+		// has no existing schedules (converting from legacy). An empty schedules
+		// array on a task that already has schedules is treated as "no change".
+		if len(newSchedules) > 0 || len(task.Schedules) == 0 {
+			task.Schedules = newSchedules
+			// Reset scheduling state when schedules change
+			if task.State == model.StateWaiting {
+				task.State = model.StatePending
+				task.NextFireAt = nil
+				task.NextFireScheduleIdx = -1
+			}
 		}
 	}
 
@@ -246,6 +252,8 @@ func (s *Server) enableTask(w http.ResponseWriter, r *http.Request) {
 		task.RetryCount = 0
 		task.LastError = ""
 		task.NextFireAt = nil
+		task.NextFireScheduleIdx = -1
+		task.CurrentScheduleIdx = -1
 	}
 
 	if err := s.store.Update(task); err != nil {
@@ -328,6 +336,8 @@ func (s *Server) retryTask(w http.ResponseWriter, r *http.Request) {
 	task.RetryCount = 0
 	task.LastError = ""
 	task.NextFireAt = nil
+	task.NextFireScheduleIdx = -1
+	task.CurrentScheduleIdx = -1
 	if err := s.store.Update(task); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

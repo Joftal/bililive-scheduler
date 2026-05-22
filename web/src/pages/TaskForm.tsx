@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Form, Input, InputNumber, Button, Card, Space, message, Typography } from 'antd';
+import { Form, Input, InputNumber, Button, Card, Space, message, Typography, Alert } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../services/api';
 import ScheduleEditor from '../components/ScheduleEditor';
@@ -16,6 +16,7 @@ export default function TaskForm() {
   const [selectedRoom, setSelectedRoom] = useState<RoomInfo | null>(null);
   const [taskData, setTaskData] = useState<{ room_url?: string; room_id?: string } | null>(null);
   const [schedules, setSchedules] = useState<ScheduleEntry[]>([]);
+  const [isLegacy, setIsLegacy] = useState(false);
 
   useEffect(() => {
     if (isEdit) {
@@ -25,6 +26,8 @@ export default function TaskForm() {
           setTaskData({ room_url: task.room_url, room_id: task.room_id });
           if (task.schedules && task.schedules.length > 0) {
             setSchedules(task.schedules);
+          } else {
+            setIsLegacy(true);
           }
           form.setFieldsValue({
             name: task.name,
@@ -102,6 +105,15 @@ export default function TaskForm() {
               }}
             />
           </Form.Item>
+        )}
+
+        {isLegacy && (
+          <Alert
+            type="info"
+            showIcon
+            message="此任务使用旧版 Cron 表达式，请添加可视化录制计划后保存以完成升级。"
+            style={{ marginBottom: 16 }}
+          />
         )}
 
         <Form.Item
