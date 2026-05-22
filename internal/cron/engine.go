@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kira1928/bililive-scheduler/internal/client"
@@ -15,7 +16,7 @@ import (
 type Engine struct {
 	store    *db.Store
 	client   *client.BiliAPI
-	interval time.Duration
+	interval atomic.Int32 // seconds, hot-reloadable
 
 	mu      sync.RWMutex
 	running bool
@@ -23,15 +24,32 @@ type Engine struct {
 	cancel  context.CancelFunc
 }
 
-func NewEngine(store *db.Store, client *client.BiliAPI, interval time.Duration) *Engine {
+func NewEngine(store *db.Store, client *client.BiliAPI, interval int) *Engine {
 	if interval <= 0 {
-		interval = 15 * time.Second
+		interval = 15
 	}
-	return &Engine{
-		store:    store,
-		client:   client,
-		interval: interval,
+	e := &Engine{
+		store:  store,
+		client: client,
 	}
+	e.interval.Store(int32(interval))
+	return e
+}
+
+// SetInterval updates the tick interval in seconds (hot-reloadable).
+func (e *Engine) SetInterval(seconds int) {
+	if seconds < 5 {
+		seconds = 5
+	}
+	if seconds > 300 {
+		seconds = 300
+	}
+	e.interval.Store(int32(seconds))
+}
+
+// GetInterval returns the current tick interval in seconds.
+func (e *Engine) GetInterval() int {
+	return int(e.interval.Load())
 }
 
 func (e *Engine) Start(ctx context.Context) error {
@@ -45,12 +63,10 @@ func (e *Engine) Start(ctx context.Context) error {
 	e.startAt = time.Now()
 	e.mu.Unlock()
 
-	log.Printf("[cron] engine started, interval=%s", e.interval)
-
-	ticker := time.NewTicker(e.interval)
-	defer ticker.Stop()
+	log.Printf("[cron] engine started, interval=%ds", e.interval.Load())
 
 	for {
+		d := time.Duration(e.interval.Load()) * time.Second
 		select {
 		case <-ctx.Done():
 			e.mu.Lock()
@@ -58,7 +74,7 @@ func (e *Engine) Start(ctx context.Context) error {
 			e.mu.Unlock()
 			log.Printf("[cron] engine stopped")
 			return nil
-		case <-ticker.C:
+		case <-time.After(d):
 			if err := e.evaluate(ctx); err != nil {
 				log.Printf("[cron] evaluate error: %v", err)
 			}

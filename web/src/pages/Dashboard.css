@@ -140,8 +140,19 @@
   gap: 16px;
 }
 
+.bottom-grid-3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+@media (max-width: 992px) {
+  .bottom-grid-3 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 @media (max-width: 768px) {
-  .bottom-grid {
+  .bottom-grid,
+  .bottom-grid-3 {
     grid-template-columns: 1fr;
   }
 }
@@ -197,6 +208,25 @@
 
 .connection-row .conn-status {
   margin-left: auto;
+}
+
+/* Config row */
+.config-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.config-label {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.config-hint {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.35);
+  margin-top: 8px;
 }
 
 /* Help list */

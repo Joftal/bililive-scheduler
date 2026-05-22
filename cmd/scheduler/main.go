@@ -42,7 +42,12 @@ func main() {
 	biliClient := client.NewBiliAPI(cfg.APIURL)
 
 	// Init cron engine
-	engine := cron.NewEngine(store, biliClient, 0) // default 15s interval
+	tickInterval := 15 // default
+	if saved, err := store.GetConfig("tick_interval", "15"); err == nil {
+		fmt.Sscanf(saved, "%d", &tickInterval)
+	}
+	engine := cron.NewEngine(store, biliClient, tickInterval)
+	log.Printf("[main] cron engine tick interval: %ds", tickInterval)
 
 	// Start cron engine in background
 	engineCtx, engineCancel := context.WithCancel(context.Background())

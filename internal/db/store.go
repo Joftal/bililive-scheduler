@@ -301,3 +301,25 @@ func boolToInt(b bool) int {
 	}
 	return 0
 }
+
+// GetConfig retrieves a config value by key. Returns defaultValue if not found.
+func (s *Store) GetConfig(key, defaultValue string) (string, error) {
+	var value string
+	err := s.db.QueryRow("SELECT value FROM config WHERE key = ?", key).Scan(&value)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return defaultValue, nil
+		}
+		return defaultValue, err
+	}
+	return value, nil
+}
+
+// SetConfig upserts a config key-value pair.
+func (s *Store) SetConfig(key, value string) error {
+	_, err := s.db.Exec(
+		"INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?",
+		key, value, value,
+	)
+	return err
+}

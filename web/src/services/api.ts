@@ -59,4 +59,9 @@ export const api = {
 
   // Rooms
   getRooms: () => request<RoomInfo[]>('/rooms'),
+
+  // Config
+  getConfig: () => request<{ tick_interval: number }>('/config'),
+  updateConfig: (data: { tick_interval: number }) =>
+    request<{ tick_interval: number }>('/config', { method: 'PUT', body: JSON.stringify(data) }),
 };

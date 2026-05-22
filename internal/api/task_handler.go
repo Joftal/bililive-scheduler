@@ -49,6 +49,8 @@ func (s *Server) Router() *mux.Router {
 
 	api.HandleFunc("/status", s.schedulerStatus).Methods("GET")
 	api.HandleFunc("/rooms", s.listRooms).Methods("GET")
+	api.HandleFunc("/config", s.getConfig).Methods("GET")
+	api.HandleFunc("/config", s.updateConfig).Methods("PUT")
 
 	r.HandleFunc("/health", s.health).Methods("GET")
 	return r
@@ -416,6 +418,38 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 func parseID(r *http.Request) (int64, error) {
 	vars := mux.Vars(r)
 	return strconv.ParseInt(vars["id"], 10, 64)
+}
+
+func (s *Server) getConfig(w http.ResponseWriter, _ *http.Request) {
+	interval := s.engine.GetInterval()
+	writeJSON(w, map[string]any{
+		"tick_interval": interval,
+	})
+}
+
+func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req struct {
+		TickInterval *int `json:"tick_interval"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	if req.TickInterval != nil {
+		val := *req.TickInterval
+		if val < 5 || val > 300 {
+			writeError(w, http.StatusBadRequest, "tick_interval must be between 5 and 300")
+			return
+		}
+		s.engine.SetInterval(val)
+		if err := s.store.SetConfig("tick_interval", fmt.Sprintf("%d", val)); err != nil {
+			log.Printf("[api] save tick_interval config error: %v", err)
+		}
+	}
+
+	s.getConfig(w, r)
 }
 
 // findScheduleConflict checks if any existing task for the same room has overlapping schedules.

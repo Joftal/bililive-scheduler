@@ -73,6 +73,10 @@ func migrate(db *sql.DB) error {
 			created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_executions_task_id ON task_executions(task_id)`,
+		`CREATE TABLE IF NOT EXISTS config (
+			key   TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		)`,
 	}
 
 	for _, m := range migrations {
