@@ -5,37 +5,50 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/kira1928/bililive-scheduler/internal/client"
+	"github.com/kira1928/bililive-scheduler/internal/config"
 	"github.com/kira1928/bililive-scheduler/internal/cron"
 	"github.com/kira1928/bililive-scheduler/internal/db"
 	"github.com/kira1928/bililive-scheduler/internal/model"
+	"golang.org/x/time/rate"
 )
 
 type Server struct {
 	store  *db.Store
 	client *client.BiliAPI
 	engine *cron.Engine
+	cfg    *config.Config
 }
 
-func NewServer(store *db.Store, client *client.BiliAPI, engine *cron.Engine) *Server {
+func NewServer(store *db.Store, client *client.BiliAPI, engine *cron.Engine, cfg *config.Config) *Server {
 	return &Server{
 		store:  store,
 		client: client,
 		engine: engine,
+		cfg:    cfg,
 	}
 }
 
 func (s *Server) Router() *mux.Router {
 	r := mux.NewRouter()
-	r.Use(corsMiddleware)
+	r.Use(securityHeadersMiddleware)
+	r.Use(s.corsMiddleware)
 
 	api := r.PathPrefix("/api").Subrouter()
+	if s.cfg.APIKey != "" {
+		api.Use(s.authMiddleware)
+	}
+	if s.cfg.RateLimit > 0 {
+		api.Use(s.rateLimitMiddleware)
+	}
 
 	api.HandleFunc("/tasks", s.listTasks).Methods("GET")
 	api.HandleFunc("/tasks", s.createTask).Methods("POST")
@@ -203,12 +216,11 @@ func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Lock and check if task is recording
+	// Phase 1: check task state under lock
 	s.store.TaskMu.Lock()
-	defer s.store.TaskMu.Unlock()
-
 	task, err := s.store.Get(id)
 	if err != nil {
+		s.store.TaskMu.Unlock()
 		if errors.Is(err, db.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "task not found")
 		} else {
@@ -216,14 +228,22 @@ func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	needStop := task.State == model.StateRecording
+	stopRoomID := task.RoomID
+	s.store.TaskMu.Unlock()
 
-	// Stop recording before deleting
-	if task.State == model.StateRecording {
-		if stopErr := s.client.StopRecording(r.Context(), task.RoomID); stopErr != nil {
-			writeError(w, http.StatusConflict, "cannot stop recording: "+stopErr.Error())
+	// Phase 2: stop recording outside lock (HTTP call, may be slow)
+	if needStop {
+		if stopErr := s.client.StopRecording(r.Context(), stopRoomID); stopErr != nil {
+			log.Printf("[api] delete task %d: stop recording error: %v", id, stopErr)
+			writeError(w, http.StatusConflict, "cannot stop recording")
 			return
 		}
 	}
+
+	// Phase 3: delete under lock
+	s.store.TaskMu.Lock()
+	defer s.store.TaskMu.Unlock()
 
 	if err := s.store.Delete(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -279,10 +299,34 @@ func (s *Server) disableTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Phase 1: check task state under lock
+	s.store.TaskMu.Lock()
+	task, err := s.store.Get(id)
+	if err != nil {
+		s.store.TaskMu.Unlock()
+		if errors.Is(err, db.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "task not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	needStop := task.State == model.StateRecording
+	stopRoomID := task.RoomID
+	s.store.TaskMu.Unlock()
+
+	// Phase 2: stop recording outside lock (HTTP call, may be slow)
+	var stopErr error
+	if needStop {
+		stopErr = s.client.StopRecording(r.Context(), stopRoomID)
+	}
+
+	// Phase 3: apply state changes under lock
 	s.store.TaskMu.Lock()
 	defer s.store.TaskMu.Unlock()
 
-	task, err := s.store.Get(id)
+	// Re-get task in case it changed
+	task, err = s.store.Get(id)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "task not found")
@@ -292,16 +336,14 @@ func (s *Server) disableTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stop recording if active
-	if task.State == model.StateRecording {
-		if stopErr := s.client.StopRecording(r.Context(), task.RoomID); stopErr != nil {
+	if needStop {
+		if stopErr != nil {
 			log.Printf("[api] disable task %d: stop recording error: %v", id, stopErr)
 			task.State = model.StateError
-			task.LastError = "stop failed: " + stopErr.Error()
+			task.LastError = "stop failed"
 		} else {
 			task.State = model.StateCompleted
 			task.LastError = "stopped by disable"
-			// Update execution history
 			now := time.Now()
 			execs, _ := s.store.GetExecutions(task.ID, 1)
 			if len(execs) > 0 && execs[0].State == model.StateRecording {
@@ -418,7 +460,8 @@ func (s *Server) schedulerStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listRooms(w http.ResponseWriter, r *http.Request) {
 	rooms, err := s.client.GetRooms(r.Context())
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "failed to fetch rooms: "+err.Error())
+		log.Printf("[api] listRooms upstream error: %v", err)
+		writeError(w, http.StatusBadGateway, "failed to fetch rooms from upstream")
 		return
 	}
 	writeJSON(w, rooms)
@@ -530,21 +573,163 @@ func writeJSONWithStatus(w http.ResponseWriter, status int, v any) {
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
-	if status >= 500 {
-		log.Printf("[api] internal error: %s", msg)
-		msg = "internal server error"
+	if status >= 400 {
+		log.Printf("[api] error (status %d): %s", status, msg)
+	}
+	if status >= 400 {
+		msg = sanitizeErrorMessage(msg)
 	}
 	writeJSONWithStatus(w, status, map[string]string{"error": msg})
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
+func sanitizeErrorMessage(msg string) string {
+	replacements := []string{
+		"http://", "",
+		"https://", "",
+		"localhost", "upstream",
+	}
+	for i := 0; i < len(replacements)-1; i += 2 {
+		msg = strings.ReplaceAll(msg, replacements[i], replacements[i+1])
+	}
+	return msg
+}
+
+func (s *Server) corsMiddleware(next http.Handler) http.Handler {
+	allowed := parseAllowedOrigins(s.cfg.AllowedOrigins)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			if allowed["*"] {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			} else if allowed[origin] {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")
+			}
+		} else if allowed["*"] {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusNoContent)
 			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func parseAllowedOrigins(raw string) map[string]bool {
+	m := make(map[string]bool)
+	for _, o := range strings.Split(raw, ",") {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			m[o] = true
+		}
+	}
+	return m
+}
+
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != s.cfg.APIKey {
+			writeJSONWithStatus(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type ipLimiter struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+type rateLimitStore struct {
+	mu       sync.Mutex
+	limiters map[string]*ipLimiter
+	rate     rate.Limit
+	burst    int
+}
+
+func newRateLimitStore(rps float64, burst int) *rateLimitStore {
+	return &rateLimitStore{
+		limiters: make(map[string]*ipLimiter),
+		rate:     rate.Limit(rps),
+		burst:    burst,
+	}
+}
+
+func (s *rateLimitStore) getLimiter(ip string) *rate.Limiter {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if l, ok := s.limiters[ip]; ok {
+		l.lastSeen = time.Now()
+		return l.limiter
+	}
+	limiter := rate.NewLimiter(s.rate, s.burst)
+	s.limiters[ip] = &ipLimiter{limiter: limiter, lastSeen: time.Now()}
+	return limiter
+}
+
+func (s *rateLimitStore) cleanup() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for ip, l := range s.limiters {
+		if time.Since(l.lastSeen) > 3*time.Minute {
+			delete(s.limiters, ip)
+		}
+	}
+}
+
+func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
+	// Lazy init: create store once on first use
+	var once sync.Once
+	var store *rateLimitStore
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() {
+			store = newRateLimitStore(s.cfg.RateLimit, s.cfg.RateBurst)
+			go func() {
+				ticker := time.NewTicker(time.Minute)
+				defer ticker.Stop()
+				for range ticker.C {
+					store.cleanup()
+				}
+			}()
+		})
+
+		ip := extractIP(r)
+		if !store.getLimiter(ip).Allow() {
+			writeJSONWithStatus(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func extractIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if parts := strings.SplitN(xff, ",", 2); len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return xri
+	}
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	return host
+}
+
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-XSS-Protection", "0")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		if strings.HasPrefix(r.URL.Path, "/api") {
+			w.Header().Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)
 	})

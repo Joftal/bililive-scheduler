@@ -61,7 +61,7 @@ func main() {
 	}()
 
 	// Init HTTP server
-	apiServer := api.NewServer(store, biliClient, engine)
+	apiServer := api.NewServer(store, biliClient, engine, cfg)
 	router := apiServer.Router()
 
 	// Serve Web UI at root (catch-all, must be registered last)
@@ -81,7 +81,13 @@ func main() {
 		log.Printf("[main] warning: failed to write port file: %v", err)
 	}
 
-	httpServer := &http.Server{Handler: router}
+	httpServer := &http.Server{
+		Handler:           router,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
 	go func() {
 		if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {

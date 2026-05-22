@@ -182,8 +182,17 @@ func (t *ScheduleTask) Validate() error {
 	if t.RoomID == "" {
 		return fmt.Errorf("room_id is required")
 	}
+	if len(t.RoomID) > 256 {
+		return fmt.Errorf("room_id must be <= 256 characters")
+	}
+	if len(t.RoomURL) > 2048 {
+		return fmt.Errorf("room_url must be <= 2048 characters")
+	}
 	if len(t.Schedules) == 0 {
 		return fmt.Errorf("at least one schedule entry is required")
+	}
+	if len(t.Schedules) > 32 {
+		return fmt.Errorf("schedules must be <= 32 entries")
 	}
 	for i := range t.Schedules {
 		if err := t.Schedules[i].Validate(); err != nil {

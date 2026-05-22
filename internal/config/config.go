@@ -9,11 +9,15 @@ import (
 )
 
 type Config struct {
-	Port     int
-	APIURL   string
-	DBPath   string
-	LogLevel string
-	Version  string
+	Port           int
+	APIURL         string
+	DBPath         string
+	LogLevel       string
+	Version        string
+	APIKey         string
+	AllowedOrigins string
+	RateLimit      float64
+	RateBurst      int
 }
 
 func Parse() *Config {
@@ -24,6 +28,10 @@ func Parse() *Config {
 	flag.StringVar(&cfg.DBPath, "db-path", "", "SQLite database path")
 	flag.StringVar(&cfg.LogLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	flag.StringVar(&cfg.Version, "version", "0.1.0", "Version string")
+	flag.StringVar(&cfg.APIKey, "api-key", "", "API key for authentication (empty = disabled)")
+	flag.StringVar(&cfg.AllowedOrigins, "allowed-origins", "*", "Comma-separated list of allowed CORS origins (\"*\" = allow all)")
+	flag.Float64Var(&cfg.RateLimit, "rate-limit", 30, "Rate limit per IP (requests/second, 0 = disabled)")
+	flag.IntVar(&cfg.RateBurst, "rate-burst", 60, "Rate limit burst size")
 	flag.Parse()
 
 	if cfg.DBPath == "" {

@@ -1,10 +1,11 @@
 module github.com/kira1928/bililive-scheduler
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/gorilla/mux v1.8.1
 	github.com/robfig/cron/v3 v3.0.1
+	golang.org/x/time v0.15.0
 	modernc.org/sqlite v1.42.2
 )
 
