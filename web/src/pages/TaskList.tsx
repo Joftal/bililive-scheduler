@@ -235,6 +235,7 @@ export default function TaskList() {
         loading={loading}
         pagination={false}
         size="middle"
+        tableLayout="fixed"
         expandedRowKeys={expandedRowKeys}
         expandable={{
           expandedRowRender: (r) => {
