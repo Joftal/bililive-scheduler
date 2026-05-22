@@ -58,7 +58,6 @@
   display: flex;
   gap: 24px;
   flex-wrap: nowrap;
-  overflow-x: auto;
 }
 
 .entry-field {
