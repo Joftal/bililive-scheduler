@@ -164,7 +164,7 @@ export default function TaskList() {
               return (
                 <div key={i}>
                   <Tag color="blue" style={{ margin: '0 4px 2px 0' }}>{days}</Tag>
-                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>{detail}</Typography.Text>
+                  <Typography.Text type="secondary" style={{ fontSize: 13 }} ellipsis>{detail}</Typography.Text>
                 </div>
               );
             })}
@@ -208,7 +208,7 @@ export default function TaskList() {
               </Button>
             )}
             <Popconfirm title="确认删除此任务？" onConfirm={() => handleDelete(r.id)} onCancel={(e) => e?.stopPropagation()} disabled={isRecording}>
-              <Button size="small" icon={<DeleteOutlined />} danger onClick={(e) => e.stopPropagation()} disabled={isRecording} />
+              <Button size="small" icon={<DeleteOutlined />} danger onClick={(e) => { if (!isRecording) e.stopPropagation(); }} disabled={isRecording} />
             </Popconfirm>
           </Space>
         );
