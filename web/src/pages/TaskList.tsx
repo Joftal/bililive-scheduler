@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Table, Button, Space, Popconfirm, message, Typography, Switch, Tag, Tooltip, Card } from 'antd';
+import { Table, Button, Space, Popconfirm, message, Typography, Switch, Tooltip } from 'antd';
 import {
   PlusOutlined, DeleteOutlined, EditOutlined, ReloadOutlined,
-  RedoOutlined, HistoryOutlined,
+  RedoOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
@@ -15,7 +15,6 @@ const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
 function formatDays(days: number[]): string {
   if (days.length === 0) return '';
   const sorted = [...days].sort((a, b) => a - b);
-  // Try to find consecutive ranges
   const ranges: string[] = [];
   let start = sorted[0];
   let end = sorted[0];
@@ -43,8 +42,9 @@ function formatScheduleSummary(schedules: ScheduleEntry[]): string {
 export default function TaskList() {
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
   const [loading, setLoading] = useState(true);
-  const [history, setHistory] = useState<TaskExecution[] | null>(null);
-  const [historyTaskId, setHistoryTaskId] = useState<number | null>(null);
+  const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([]);
+  const [historyCache, setHistoryCache] = useState<Record<number, TaskExecution[]>>({});
+  const [loadingHistory, setLoadingHistory] = useState<Record<number, boolean>>({});
   const navigate = useNavigate();
 
   const load = useCallback(() => {
@@ -56,6 +56,29 @@ export default function TaskList() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadHistory = async (taskId: number) => {
+    setLoadingHistory((prev) => ({ ...prev, [taskId]: true }));
+    try {
+      const data = await api.getTaskHistory(taskId);
+      setHistoryCache((prev) => ({ ...prev, [taskId]: data }));
+    } catch (e: unknown) {
+      message.error('获取历史失败: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setLoadingHistory((prev) => ({ ...prev, [taskId]: false }));
+    }
+  };
+
+  const toggleExpand = (taskId: number) => {
+    if (expandedRowKeys.includes(taskId)) {
+      setExpandedRowKeys(expandedRowKeys.filter((k) => k !== taskId));
+    } else {
+      setExpandedRowKeys([...expandedRowKeys, taskId]);
+      if (!historyCache[taskId]) {
+        loadHistory(taskId);
+      }
+    }
+  };
 
   const handleDelete = async (id: number) => {
     try {
@@ -92,16 +115,6 @@ export default function TaskList() {
     }
   };
 
-  const showHistory = async (taskId: number) => {
-    try {
-      const data = await api.getTaskHistory(taskId);
-      setHistory(data);
-      setHistoryTaskId(taskId);
-    } catch (e: unknown) {
-      message.error('获取历史失败: ' + (e instanceof Error ? e.message : String(e)));
-    }
-  };
-
   const columns = [
     {
       title: '名称',
@@ -110,13 +123,14 @@ export default function TaskList() {
     },
     {
       title: '房间',
-      dataIndex: 'room_url',
-      ellipsis: true,
-      render: (url: string) => (
-        <Tooltip title={url}>
-          <Typography.Text style={{ maxWidth: 200 }} ellipsis>{url}</Typography.Text>
-        </Tooltip>
-      ),
+      render: (_: unknown, r: ScheduleTask) => {
+        const display = r.room_url || r.room_id || '-';
+        return (
+          <Tooltip title={display}>
+            <Typography.Text style={{ maxWidth: 200 }} ellipsis>{display}</Typography.Text>
+          </Tooltip>
+        );
+      },
     },
     {
       title: '录制计划',
@@ -128,11 +142,6 @@ export default function TaskList() {
           </Tooltip>
         );
       },
-    },
-    {
-      title: '时长',
-      width: 90,
-      render: () => <Tag color="blue">按时间段</Tag>,
     },
     {
       title: '状态',
@@ -158,18 +167,17 @@ export default function TaskList() {
     },
     {
       title: '操作',
-      width: 200,
+      width: 160,
       render: (_: unknown, r: ScheduleTask) => (
         <Space size="small">
-          <Button size="small" icon={<EditOutlined />} onClick={() => navigate(`/tasks/${r.id}/edit`)} />
+          <Button size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); navigate(`/tasks/${r.id}/edit`); }} />
           {r.state === 'error' && (
-            <Button size="small" icon={<RedoOutlined />} onClick={() => handleRetry(r.id)} type="primary" danger>
+            <Button size="small" icon={<RedoOutlined />} onClick={(e) => { e.stopPropagation(); handleRetry(r.id); }} type="primary" danger>
               重试
             </Button>
           )}
-          <Button size="small" icon={<HistoryOutlined />} onClick={() => showHistory(r.id)} />
-          <Popconfirm title="确认删除此任务？" onConfirm={() => handleDelete(r.id)}>
-            <Button size="small" icon={<DeleteOutlined />} danger />
+          <Popconfirm title="确认删除此任务？" onConfirm={() => handleDelete(r.id)} onCancel={(e) => e?.stopPropagation()}>
+            <Button size="small" icon={<DeleteOutlined />} danger onClick={(e) => e.stopPropagation()} />
           </Popconfirm>
         </Space>
       ),
@@ -195,30 +203,44 @@ export default function TaskList() {
         loading={loading}
         pagination={false}
         size="middle"
-   expandable={{
-          expandedRowRender: (r) => r.last_error ? (
-            <Typography.Text type="danger">错误信息: {r.last_error} (重试 {r.retry_count}/{r.max_retries})</Typography.Text>
-          ) : <Typography.Text type="secondary">无错误信息</Typography.Text>,
-          rowExpandable: (r) => r.state === 'error' || r.last_error !== '',
+        expandedRowKeys={expandedRowKeys}
+        expandable={{
+          expandedRowRender: (r) => {
+            const execs = historyCache[r.id];
+            if (loadingHistory[r.id]) {
+              return <Typography.Text type="secondary">加载中...</Typography.Text>;
+            }
+            if (!execs || execs.length === 0) {
+              return <Typography.Text type="secondary">暂无执行记录</Typography.Text>;
+            }
+            return (
+              <Table
+                dataSource={execs}
+                rowKey="id"
+                size="small"
+                pagination={false}
+                style={{ margin: '0 16px' }}
+                columns={[
+                  { title: '开始时间', dataIndex: 'start_time', render: (t: string) => dayjs(t).format('MM-DD HH:mm:ss') },
+                  { title: '结束时间', dataIndex: 'end_time', render: (t: string | null) => t ? dayjs(t).format('MM-DD HH:mm:ss') : '-', width: 170 },
+                  { title: '状态', dataIndex: 'state', width: 100, render: (s: string) => <StatusBadge state={s as ScheduleTask['state']} /> },
+                  { title: '备注', dataIndex: 'error', ellipsis: true },
+                ]}
+              />
+            );
+          },
+          showExpandColumn: false,
         }}
+        onRow={(record) => ({
+          onClick: (e) => {
+            const target = e.target as HTMLElement;
+            if (target.tagName === 'TD') {
+              toggleExpand(record.id);
+            }
+          },
+          style: { cursor: 'pointer', transition: 'background-color 0.2s' },
+        })}
       />
-
-      {history && (
-        <Card title={`执行历史 - 任务 #${historyTaskId}`} extra={<Button size="small" onClick={() => setHistory(null)}>关闭</Button>}>
-          <Table
-            dataSource={history}
-            rowKey="id"
-            size="small"
-            pagination={false}
-            columns={[
-              { title: '开始时间', dataIndex: 'start_time', render: (t: string) => dayjs(t).format('MM-DD HH:mm:ss') },
-              { title: '结束时间', dataIndex: 'end_time', render: (t: string | null) => t ? dayjs(t).format('MM-DD HH:mm:ss') : '-' },
-              { title: '状态', dataIndex: 'state', render: (s: string) => <StatusBadge state={s as ScheduleTask['state']} /> },
-              { title: '备注', dataIndex: 'error' },
-            ]}
-          />
-        </Card>
-      )}
     </Space>
   );
 }
