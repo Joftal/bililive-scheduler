@@ -7,7 +7,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import StatusBadge from '../components/StatusBadge';
-import type { ScheduleTask, ScheduleEntry, TaskExecution } from '../types/task';
+import type { ScheduleTask, ScheduleEntry, TaskExecution, RoomInfo } from '../types/task';
 import dayjs from 'dayjs';
 
 const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
@@ -41,6 +41,7 @@ function formatScheduleSummary(schedules: ScheduleEntry[]): string {
 
 export default function TaskList() {
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
+  const [rooms, setRooms] = useState<Record<string, RoomInfo>>({});
   const [loading, setLoading] = useState(true);
   const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([]);
   const [historyCache, setHistoryCache] = useState<Record<number, TaskExecution[]>>({});
@@ -49,8 +50,18 @@ export default function TaskList() {
 
   const load = useCallback(() => {
     setLoading(true);
-    api.listTasks()
-      .then(setTasks)
+    Promise.all([
+      api.listTasks(),
+      api.getRooms().catch(() => [] as RoomInfo[]),
+    ])
+      .then(([taskList, roomList]) => {
+        setTasks(taskList);
+        const roomMap: Record<string, RoomInfo> = {};
+        for (const r of roomList) {
+          roomMap[r.id] = r;
+        }
+        setRooms(roomMap);
+      })
       .catch((e) => message.error('加载失败: ' + e.message))
       .finally(() => setLoading(false));
   }, []);
@@ -124,9 +135,10 @@ export default function TaskList() {
     {
       title: '房间',
       render: (_: unknown, r: ScheduleTask) => {
-        const display = r.room_url || r.room_id || '-';
+        const room = rooms[r.room_id];
+        const display = room?.host_name || room?.room_name || r.room_id || '-';
         return (
-          <Tooltip title={display}>
+          <Tooltip title={room ? `${room.host_name} (${r.room_id})` : r.room_id}>
             <Typography.Text style={{ maxWidth: 200 }} ellipsis>{display}</Typography.Text>
           </Tooltip>
         );
