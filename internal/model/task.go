@@ -26,7 +26,7 @@ const (
 
 // ScheduleEntry represents a single time slot in a task.
 type ScheduleEntry struct {
-	Days        []int  `json:"days"`         // 0=Sun, 1=Mon, ..., 6=Sat
+	Days        []int  `json:"days"`         // 1=Mon, 2=Tue, ..., 6=Sat, 7=Sun (ISO 8601)
 	StartTime   string `json:"start_time"`   // "HH:MM" format, 24-hour
 	DurationMin int    `json:"duration_min"` // 0 = until stream ends
 	CronExpr    string `json:"cron_expr"`    // auto-generated, read-only for clients
@@ -93,6 +93,7 @@ type RoomInfo struct {
 }
 
 // GenerateCronForEntry generates a cron expression from a ScheduleEntry's Days and StartTime.
+// Days are in ISO 8601 format (1=Mon..7=Sun), converted to cron format (0=Sun..6=Sat).
 // Example: Days=[1,3,5], StartTime="20:30" => "30 20 * * 1,3,5"
 func GenerateCronForEntry(entry ScheduleEntry) (string, error) {
 	parts := timeRegex.FindStringSubmatch(entry.StartTime)
@@ -107,20 +108,21 @@ func GenerateCronForEntry(entry ScheduleEntry) (string, error) {
 	}
 
 	seen := make(map[int]bool)
-	var days []int
+	var cronDays []int
 	for _, d := range entry.Days {
-		if d < 0 || d > 6 {
-			return "", fmt.Errorf("invalid day %d: must be 0-6 (0=Sun)", d)
+		if d < 1 || d > 7 {
+			return "", fmt.Errorf("invalid day %d: must be 1-7 (1=Mon, 7=Sun)", d)
 		}
-		if !seen[d] {
-			seen[d] = true
-			days = append(days, d)
+		cronDay := d % 7 // ISO 7 (Sun) → cron 0 (Sun), others stay the same
+		if !seen[cronDay] {
+			seen[cronDay] = true
+			cronDays = append(cronDays, cronDay)
 		}
 	}
-	sort.Ints(days)
+	sort.Ints(cronDays)
 
 	var dayStrs []string
-	for _, d := range days {
+	for _, d := range cronDays {
 		dayStrs = append(dayStrs, fmt.Sprintf("%d", d))
 	}
 
@@ -140,8 +142,8 @@ func (e *ScheduleEntry) Validate() error {
 	}
 	seen := make(map[int]bool)
 	for _, d := range e.Days {
-		if d < 0 || d > 6 {
-			return fmt.Errorf("invalid day %d: must be 0-6 (0=Sun)", d)
+		if d < 1 || d > 7 {
+			return fmt.Errorf("invalid day %d: must be 1-7 (1=Mon, 7=Sun)", d)
 		}
 		if seen[d] {
 			return fmt.Errorf("duplicate day %d", d)

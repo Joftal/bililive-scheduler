@@ -492,8 +492,9 @@ func (s *Server) findScheduleConflict(roomID string, schedules []model.ScheduleE
 				overlap := dayOverlap(newEntry.Days, oldEntry.Days)
 				if len(overlap) > 0 {
 					dayNames := make([]string, len(overlap))
+					isoDayNames := []string{"", "一", "二", "三", "四", "五", "六", "日"}
 					for i, d := range overlap {
-						dayNames[i] = []string{"日", "一", "二", "三", "四", "五", "六"}[d]
+						dayNames[i] = isoDayNames[d]
 					}
 					return fmt.Sprintf("与任务 #%d 在周%s的 %s 时间冲突",
 						other.ID, strings.Join(dayNames, "、"), newEntry.StartTime)

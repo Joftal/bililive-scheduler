@@ -6,13 +6,13 @@ import type { ScheduleEntry } from '../types/task';
 import './ScheduleEditor.css';
 
 const DAY_OPTIONS = [
-  { label: '日', value: 0 },
   { label: '一', value: 1 },
   { label: '二', value: 2 },
   { label: '三', value: 3 },
   { label: '四', value: 4 },
   { label: '五', value: 5 },
   { label: '六', value: 6 },
+  { label: '日', value: 7 },
 ];
 
 interface Props {
@@ -36,7 +36,7 @@ function findDuplicateConflicts(entries: ScheduleEntry[]): string[] {
       if (entries[i].start_time === entries[j].start_time && entries[i].start_time) {
         const overlap = entries[i].days.filter((d) => entries[j].days.includes(d));
         if (overlap.length > 0) {
-          const dayNames = overlap.map((d) => DAY_OPTIONS[d].label).join('、');
+          const dayNames = overlap.map((d) => DAY_OPTIONS.find(o => o.value === d)?.label ?? String(d)).join('、');
           warnings.push(`时间段 ${i + 1} 和 ${j + 1} 在 ${dayNames} 的 ${entries[i].start_time} 重复`);
         }
       }

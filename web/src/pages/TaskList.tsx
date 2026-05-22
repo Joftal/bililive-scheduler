@@ -10,7 +10,9 @@ import StatusBadge from '../components/StatusBadge';
 import type { ScheduleTask, ScheduleEntry, TaskExecution, RoomInfo } from '../types/task';
 import dayjs from 'dayjs';
 
-const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
+const DAY_NAMES: Record<number, string> = {
+  1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六', 7: '日',
+};
 
 function formatDays(days: number[]): string {
   if (days.length === 0) return '';

@@ -1,7 +1,7 @@
 export type TaskState = 'pending' | 'waiting' | 'recording' | 'completed' | 'error';
 
 export interface ScheduleEntry {
-  days: number[];        // 0=Sun, 1=Mon, ..., 6=Sat
+  days: number[];        // 1=Mon, 2=Tue, ..., 6=Sat, 7=Sun (ISO 8601)
   start_time: string;    // "HH:MM"
   duration_min: number;  // 0 = until stream ends
   cron_expr: string;     // auto-generated, read-only
