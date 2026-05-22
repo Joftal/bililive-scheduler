@@ -171,6 +171,7 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 				task.State = model.StatePending
 				task.NextFireAt = nil
 				task.NextFireScheduleIdx = -1
+				task.RetryCount = 0
 			}
 		}
 	}

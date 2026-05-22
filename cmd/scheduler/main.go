@@ -17,6 +17,7 @@ import (
 	"github.com/kira1928/bililive-scheduler/internal/config"
 	"github.com/kira1928/bililive-scheduler/internal/cron"
 	"github.com/kira1928/bililive-scheduler/internal/db"
+	"github.com/kira1928/bililive-scheduler/internal/model"
 	"github.com/kira1928/bililive-scheduler/internal/webui"
 )
 
@@ -129,18 +130,17 @@ func stopActiveRecordings(ctx context.Context, store *db.Store, client *client.B
 		}
 		// Update DB state
 		store.TaskMu.Lock()
-		task.State = "completed"
-		task.LastError = "stopped by shutdown"
+		task.State = model.StateCompleted
 		task.CurrentScheduleIdx = -1
 		if updateErr := store.Update(task); updateErr != nil {
 			log.Printf("[shutdown] update task %d error: %v", task.ID, updateErr)
 		}
 		// Update execution history
 		execs, _ := store.GetExecutions(task.ID, 1)
-		if len(execs) > 0 && execs[0].State == "recording" {
+		if len(execs) > 0 && execs[0].State == model.StateRecording {
 			exec := execs[0]
 			exec.EndTime = &now
-			exec.State = "completed"
+			exec.State = model.StateCompleted
 			exec.Error = "stopped by shutdown"
 			if err := store.UpdateExecution(exec); err != nil {
 				log.Printf("[shutdown] update execution for task %d error: %v", task.ID, err)

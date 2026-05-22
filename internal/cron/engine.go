@@ -75,9 +75,7 @@ func (e *Engine) Start(ctx context.Context) error {
 			log.Printf("[cron] engine stopped")
 			return nil
 		case <-time.After(d):
-			if err := e.evaluate(ctx); err != nil {
-				log.Printf("[cron] evaluate error: %v", err)
-			}
+			e.evaluate(ctx)
 		}
 	}
 }
@@ -108,7 +106,7 @@ func (e *Engine) Uptime() time.Duration {
 	return time.Since(e.startAt)
 }
 
-func (e *Engine) evaluate(ctx context.Context) error {
+func (e *Engine) evaluate(ctx context.Context) {
 	now := time.Now()
 
 	// Phase 1: fire due tasks
@@ -119,8 +117,6 @@ func (e *Engine) evaluate(ctx context.Context) error {
 
 	// Phase 3: reschedule completed/error tasks
 	e.rescheduleTasks(now)
-
-	return nil
 }
 
 func (e *Engine) fireDueTasks(ctx context.Context, now time.Time) {
@@ -234,10 +230,11 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 	return e.store.Update(fresh)
 }
 
-func (e *Engine) checkActiveRecordings(ctx context.Context, now time.Time) error {
+func (e *Engine) checkActiveRecordings(ctx context.Context, now time.Time) {
 	tasks, err := e.store.GetRecordingTasks()
 	if err != nil {
-		return fmt.Errorf("get recording tasks: %w", err)
+		log.Printf("[cron] get recording tasks error: %v", err)
+		return
 	}
 
 	for _, task := range tasks {
@@ -245,7 +242,6 @@ func (e *Engine) checkActiveRecordings(ctx context.Context, now time.Time) error
 			log.Printf("[cron] check recording task %d error: %v", task.ID, err)
 		}
 	}
-	return nil
 }
 
 func (e *Engine) checkRecording(ctx context.Context, task *model.ScheduleTask, now time.Time) error {
@@ -412,7 +408,11 @@ func (e *Engine) rescheduleOneTask(task *model.ScheduleTask, now time.Time) {
 		if task.RetryCount < task.MaxRetries {
 			// Compute next fire time from schedules, then apply backoff if needed
 			nextFromSchedule, schedIdx, schedErr := nextFireTime(task, now)
-			backoff := time.Duration(1<<uint(task.RetryCount)) * time.Minute
+			retryCount := task.RetryCount
+			if retryCount > 20 {
+				retryCount = 20
+			}
+			backoff := time.Duration(1<<uint(retryCount)) * time.Minute
 			if backoff > 15*time.Minute {
 				backoff = 15 * time.Minute
 			}
