@@ -143,16 +143,6 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 	if req.Name != nil {
 		task.Name = *req.Name
 	}
-	if req.CronExpr != nil {
-		task.CronExpr = *req.CronExpr
-		if task.State == model.StateWaiting {
-			task.State = model.StatePending
-			task.NextFireAt = nil
-		}
-	}
-	if req.DurationMinutes != nil {
-		task.DurationMinutes = *req.DurationMinutes
-	}
 	if req.MaxRetries != nil {
 		task.MaxRetries = *req.MaxRetries
 	}
@@ -161,10 +151,7 @@ func (s *Server) updateTask(w http.ResponseWriter, r *http.Request) {
 		if newSchedules == nil {
 			newSchedules = []model.ScheduleEntry{}
 		}
-		// Only update if the request actually provides entries, or if the task
-		// has no existing schedules (converting from legacy). An empty schedules
-		// array on a task that already has schedules is treated as "no change".
-		if len(newSchedules) > 0 || len(task.Schedules) == 0 {
+		if len(newSchedules) > 0 {
 			task.Schedules = newSchedules
 			// Reset scheduling state when schedules change
 			if task.State == model.StateWaiting {

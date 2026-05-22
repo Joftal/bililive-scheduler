@@ -24,7 +24,7 @@ func NewStore(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-const taskColumns = `id, name, room_id, room_url, cron_expr, duration_min, enabled, state,
+const taskColumns = `id, name, room_id, room_url, enabled, state,
                      next_fire_at, current_live_start, last_error, retry_count, max_retries,
                      created_at, updated_at, schedules, current_schedule_idx, next_fire_schedule_idx`
 
@@ -34,10 +34,10 @@ func (s *Store) Create(t *model.ScheduleTask) error {
 		return fmt.Errorf("marshal schedules: %w", err)
 	}
 	result, err := s.db.Exec(
-		`INSERT INTO schedule_tasks (name, room_id, room_url, cron_expr, duration_min, enabled, state,
+		`INSERT INTO schedule_tasks (name, room_id, room_url, enabled, state,
 		  max_retries, created_at, updated_at, schedules, current_schedule_idx, next_fire_schedule_idx)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.Name, t.RoomID, t.RoomURL, t.CronExpr, t.DurationMinutes,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.Name, t.RoomID, t.RoomURL,
 		boolToInt(t.Enabled), string(t.State), t.MaxRetries, t.CreatedAt, t.UpdatedAt,
 		string(schedulesJSON), t.CurrentScheduleIdx, t.NextFireScheduleIdx,
 	)
@@ -106,12 +106,12 @@ func (s *Store) Update(t *model.ScheduleTask) error {
 	}
 	_, err = s.db.Exec(
 		`UPDATE schedule_tasks SET
-			name = ?, room_id = ?, room_url = ?, cron_expr = ?, duration_min = ?,
+			name = ?, room_id = ?, room_url = ?,
 			enabled = ?, state = ?, next_fire_at = ?, current_live_start = ?,
 			last_error = ?, retry_count = ?, max_retries = ?, updated_at = ?,
 			schedules = ?, current_schedule_idx = ?, next_fire_schedule_idx = ?
 		 WHERE id = ?`,
-		t.Name, t.RoomID, t.RoomURL, t.CronExpr, t.DurationMinutes,
+		t.Name, t.RoomID, t.RoomURL,
 		boolToInt(t.Enabled), string(t.State), t.NextFireAt, t.CurrentLiveStart,
 		t.LastError, t.RetryCount, t.MaxRetries, t.UpdatedAt,
 		string(schedulesJSON), t.CurrentScheduleIdx, t.NextFireScheduleIdx, t.ID,
@@ -148,7 +148,6 @@ func (s *Store) GetDueTasks(now time.Time) ([]*model.ScheduleTask, error) {
 }
 
 func (s *Store) GetRecordingTasks() ([]*model.ScheduleTask, error) {
-	// Include disabled tasks that are still recording - they need cleanup
 	rows, err := s.db.Query(
 		`SELECT `+taskColumns+`
 		 FROM schedule_tasks WHERE state = 'recording' ORDER BY id ASC`,
@@ -247,7 +246,7 @@ func scanTask(row *sql.Row) (*model.ScheduleTask, error) {
 	var lastError sql.NullString
 	var schedulesStr sql.NullString
 	if err := row.Scan(
-		&t.ID, &t.Name, &t.RoomID, &t.RoomURL, &t.CronExpr, &t.DurationMinutes,
+		&t.ID, &t.Name, &t.RoomID, &t.RoomURL,
 		&enabled, &state, &t.NextFireAt, &t.CurrentLiveStart,
 		&lastError, &t.RetryCount, &t.MaxRetries, &t.CreatedAt, &t.UpdatedAt,
 		&schedulesStr, &t.CurrentScheduleIdx, &t.NextFireScheduleIdx,
@@ -268,7 +267,7 @@ func scanTaskRows(rows *sql.Rows) (*model.ScheduleTask, error) {
 	var lastError sql.NullString
 	var schedulesStr sql.NullString
 	if err := rows.Scan(
-		&t.ID, &t.Name, &t.RoomID, &t.RoomURL, &t.CronExpr, &t.DurationMinutes,
+		&t.ID, &t.Name, &t.RoomID, &t.RoomURL,
 		&enabled, &state, &t.NextFireAt, &t.CurrentLiveStart,
 		&lastError, &t.RetryCount, &t.MaxRetries, &t.CreatedAt, &t.UpdatedAt,
 		&schedulesStr, &t.CurrentScheduleIdx, &t.NextFireScheduleIdx,

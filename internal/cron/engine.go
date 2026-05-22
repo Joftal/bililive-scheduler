@@ -377,16 +377,7 @@ func (e *Engine) rescheduleOneTask(task *model.ScheduleTask, now time.Time) {
 	}
 }
 
-// nextFireTime computes the next fire time for a task.
-// For multi-schedule tasks, it finds the earliest across all entries.
-// For legacy tasks, it uses the single CronExpr.
+// nextFireTime computes the next fire time for a task across all schedule entries.
 func nextFireTime(task *model.ScheduleTask, from time.Time) (*time.Time, int, error) {
-	if len(task.Schedules) > 0 {
-		return NextScheduleAfter(task.Schedules, from)
-	}
-	next, err := NextAfter(task.CronExpr, from)
-	if err != nil {
-		return nil, -1, err
-	}
-	return next, -1, nil
+	return NextScheduleAfter(task.Schedules, from)
 }

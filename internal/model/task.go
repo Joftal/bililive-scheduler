@@ -24,7 +24,7 @@ const (
 	StateError     TaskState = "error"
 )
 
-// ScheduleEntry represents a single time slot in a multi-schedule task.
+// ScheduleEntry represents a single time slot in a task.
 type ScheduleEntry struct {
 	Days        []int  `json:"days"`         // 0=Sun, 1=Mon, ..., 6=Sat
 	StartTime   string `json:"start_time"`   // "HH:MM" format, 24-hour
@@ -37,8 +37,6 @@ type ScheduleTask struct {
 	Name                string          `json:"name"`
 	RoomID              string          `json:"room_id"`
 	RoomURL             string          `json:"room_url"`
-	CronExpr            string          `json:"cron_expr"`
-	DurationMinutes     int             `json:"duration_min"`
 	Enabled             bool            `json:"enabled"`
 	State               TaskState       `json:"state"`
 	NextFireAt          *time.Time      `json:"next_fire_at"`
@@ -54,21 +52,17 @@ type ScheduleTask struct {
 }
 
 type CreateTaskRequest struct {
-	Name            string          `json:"name"`
-	RoomID          string          `json:"room_id"`
-	RoomURL         string          `json:"room_url"`
-	CronExpr        string          `json:"cron_expr"`
-	DurationMinutes int             `json:"duration_min"`
-	MaxRetries      int             `json:"max_retries"`
-	Schedules       []ScheduleEntry `json:"schedules"`
+	Name       string          `json:"name"`
+	RoomID     string          `json:"room_id"`
+	RoomURL    string          `json:"room_url"`
+	MaxRetries int             `json:"max_retries"`
+	Schedules  []ScheduleEntry `json:"schedules"`
 }
 
 type UpdateTaskRequest struct {
-	Name            *string          `json:"name,omitempty"`
-	CronExpr        *string          `json:"cron_expr,omitempty"`
-	DurationMinutes *int             `json:"duration_min,omitempty"`
-	MaxRetries      *int             `json:"max_retries,omitempty"`
-	Schedules       *[]ScheduleEntry `json:"schedules,omitempty"`
+	Name       *string          `json:"name,omitempty"`
+	MaxRetries *int             `json:"max_retries,omitempty"`
+	Schedules  *[]ScheduleEntry `json:"schedules,omitempty"`
 }
 
 type TaskExecution struct {
@@ -112,7 +106,6 @@ func GenerateCronForEntry(entry ScheduleEntry) (string, error) {
 		return "", fmt.Errorf("days must not be empty")
 	}
 
-	// Validate and deduplicate days
 	seen := make(map[int]bool)
 	var days []int
 	for _, d := range entry.Days {
@@ -133,7 +126,6 @@ func GenerateCronForEntry(entry ScheduleEntry) (string, error) {
 
 	expr := fmt.Sprintf("%s %s * * %s", minute, hour, strings.Join(dayStrs, ","))
 
-	// Validate the generated expression
 	if _, err := cronParser.Parse(expr); err != nil {
 		return "", fmt.Errorf("generated cron expression is invalid: %w", err)
 	}
@@ -172,39 +164,25 @@ func (e *ScheduleEntry) Validate() error {
 }
 
 // GetEffectiveDuration returns the duration for the given schedule index.
-// Falls back to the legacy DurationMinutes when Schedules is empty.
 func (t *ScheduleTask) GetEffectiveDuration(scheduleIdx int) int {
-	if len(t.Schedules) > 0 && scheduleIdx >= 0 && scheduleIdx < len(t.Schedules) {
+	if scheduleIdx >= 0 && scheduleIdx < len(t.Schedules) {
 		return t.Schedules[scheduleIdx].DurationMin
 	}
-	return t.DurationMinutes
+	return 0
 }
 
 func (t *ScheduleTask) Validate() error {
 	if t.RoomID == "" {
 		return fmt.Errorf("room_id is required")
 	}
-
-	if len(t.Schedules) > 0 {
-		// New multi-schedule mode: validate each entry
-		for i := range t.Schedules {
-			if err := t.Schedules[i].Validate(); err != nil {
-				return fmt.Errorf("schedules[%d]: %w", i, err)
-			}
-		}
-	} else {
-		// Legacy single-cron mode
-		if t.CronExpr == "" {
-			return fmt.Errorf("cron_expr is required when schedules is empty")
-		}
-		if _, err := cronParser.Parse(t.CronExpr); err != nil {
-			return fmt.Errorf("invalid cron_expr %q: %w", t.CronExpr, err)
-		}
-		if t.DurationMinutes < 0 {
-			return fmt.Errorf("duration_min must be >= 0")
+	if len(t.Schedules) == 0 {
+		return fmt.Errorf("at least one schedule entry is required")
+	}
+	for i := range t.Schedules {
+		if err := t.Schedules[i].Validate(); err != nil {
+			return fmt.Errorf("schedules[%d]: %w", i, err)
 		}
 	}
-
 	if t.MaxRetries < 0 {
 		return fmt.Errorf("max_retries must be >= 0")
 	}
@@ -223,8 +201,6 @@ func (r *CreateTaskRequest) ToTask() *ScheduleTask {
 		Name:                r.Name,
 		RoomID:              r.RoomID,
 		RoomURL:             r.RoomURL,
-		CronExpr:            r.CronExpr,
-		DurationMinutes:     r.DurationMinutes,
 		Enabled:             true,
 		State:               StatePending,
 		MaxRetries:          maxRetries,

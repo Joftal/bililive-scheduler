@@ -12,8 +12,6 @@ export interface ScheduleTask {
   name: string;
   room_id: string;
   room_url: string;
-  cron_expr: string;
-  duration_min: number;
   enabled: boolean;
   state: TaskState;
   next_fire_at: string | null;
@@ -32,16 +30,12 @@ export interface CreateTaskRequest {
   name: string;
   room_id: string;
   room_url: string;
-  cron_expr?: string;
-  duration_min?: number;
   max_retries: number;
-  schedules?: ScheduleEntry[];
+  schedules: ScheduleEntry[];
 }
 
 export interface UpdateTaskRequest {
   name?: string;
-  cron_expr?: string;
-  duration_min?: number;
   max_retries?: number;
   schedules?: ScheduleEntry[];
 }

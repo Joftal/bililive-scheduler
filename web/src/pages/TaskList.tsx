@@ -121,26 +121,18 @@ export default function TaskList() {
     {
       title: '录制计划',
       render: (_: unknown, r: ScheduleTask) => {
-        if (r.schedules && r.schedules.length > 0) {
-          const summary = formatScheduleSummary(r.schedules);
-          return (
-            <Tooltip title={summary}>
-              <Typography.Text style={{ maxWidth: 280 }} ellipsis>{summary}</Typography.Text>
-            </Tooltip>
-          );
-        }
-        return <Tag>{r.cron_expr}</Tag>;
+        const summary = formatScheduleSummary(r.schedules || []);
+        return (
+          <Tooltip title={summary}>
+            <Typography.Text style={{ maxWidth: 280 }} ellipsis>{summary}</Typography.Text>
+          </Tooltip>
+        );
       },
     },
     {
       title: '时长',
       width: 90,
-      render: (_: unknown, r: ScheduleTask) => {
-        if (r.schedules && r.schedules.length > 0) {
-          return <Tag color="blue">按时间段</Tag>;
-        }
-        return r.duration_min > 0 ? `${r.duration_min}分钟` : '直到结束';
-      },
+      render: () => <Tag color="blue">按时间段</Tag>,
     },
     {
       title: '状态',
