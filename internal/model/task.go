@@ -55,7 +55,7 @@ type CreateTaskRequest struct {
 	Name       string          `json:"name"`
 	RoomID     string          `json:"room_id"`
 	RoomURL    string          `json:"room_url"`
-	MaxRetries int             `json:"max_retries"`
+	MaxRetries *int            `json:"max_retries"`
 	Schedules  []ScheduleEntry `json:"schedules"`
 }
 
@@ -193,9 +193,9 @@ func (t *ScheduleTask) Validate() error {
 }
 
 func (r *CreateTaskRequest) ToTask() *ScheduleTask {
-	maxRetries := r.MaxRetries
-	if maxRetries == 0 {
-		maxRetries = 3
+	maxRetries := 3
+	if r.MaxRetries != nil {
+		maxRetries = *r.MaxRetries
 	}
 	task := &ScheduleTask{
 		Name:                r.Name,

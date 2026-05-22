@@ -82,6 +82,8 @@ func (e *Engine) Start(ctx context.Context) error {
 	}
 }
 
+// Stop cancels the engine context, causing the tick loop to exit.
+// Active recordings are stopped by the caller (main.go) after this returns.
 func (e *Engine) Stop() {
 	e.mu.RLock()
 	cancel := e.cancel
@@ -110,43 +112,42 @@ func (e *Engine) evaluate(ctx context.Context) error {
 	now := time.Now()
 
 	// Phase 1: fire due tasks
-	if err := e.fireDueTasks(ctx, now); err != nil {
-		log.Printf("[cron] fireDueTasks error: %v", err)
-	}
+	e.fireDueTasks(ctx, now)
 
 	// Phase 2: check active recordings
-	if err := e.checkActiveRecordings(ctx, now); err != nil {
-		log.Printf("[cron] checkActiveRecordings error: %v", err)
-	}
+	e.checkActiveRecordings(ctx, now)
 
 	// Phase 3: reschedule completed/error tasks
-	if err := e.rescheduleTasks(now); err != nil {
-		log.Printf("[cron] rescheduleTasks error: %v", err)
-	}
+	e.rescheduleTasks(now)
 
 	return nil
 }
 
-func (e *Engine) fireDueTasks(ctx context.Context, now time.Time) error {
+func (e *Engine) fireDueTasks(ctx context.Context, now time.Time) {
 	tasks, err := e.store.GetDueTasks(now)
 	if err != nil {
-		return fmt.Errorf("get due tasks: %w", err)
+		log.Printf("[cron] get due tasks error: %v", err)
+		return
 	}
 
 	for _, task := range tasks {
 		if err := e.fireTask(ctx, task, now); err != nil {
 			log.Printf("[cron] fire task %d (%s) error: %v", task.ID, task.Name, err)
 			e.store.TaskMu.Lock()
-			task.State = model.StateError
-			task.LastError = err.Error()
-			task.RetryCount++
-			if updateErr := e.store.Update(task); updateErr != nil {
+			fresh, getErr := e.store.Get(task.ID)
+			if getErr != nil {
+				e.store.TaskMu.Unlock()
+				continue // task was deleted
+			}
+			fresh.State = model.StateError
+			fresh.LastError = err.Error()
+			fresh.RetryCount++
+			if updateErr := e.store.Update(fresh); updateErr != nil {
 				log.Printf("[cron] update task %d error: %v", task.ID, updateErr)
 			}
 			e.store.TaskMu.Unlock()
 		}
 	}
-	return nil
 }
 
 func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now time.Time) error {
@@ -188,9 +189,20 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 		log.Printf("[cron] task %d: room %s is already recording", task.ID, task.RoomID)
 		fresh.State = model.StateRecording
 		fresh.LastError = ""
-		// Set CurrentScheduleIdx from NextFireScheduleIdx
 		if len(fresh.Schedules) > 0 {
 			fresh.CurrentScheduleIdx = fresh.NextFireScheduleIdx
+		}
+		// Create execution record if none exists
+		execs, _ := e.store.GetExecutions(fresh.ID, 1)
+		if len(execs) == 0 || execs[0].State != model.StateRecording {
+			exec := &model.TaskExecution{
+				TaskID:    fresh.ID,
+				StartTime: now,
+				State:     model.StateRecording,
+			}
+			if err := e.store.AddExecution(exec); err != nil {
+				log.Printf("[cron] add execution for task %d error: %v", fresh.ID, err)
+			}
 		}
 		return e.store.Update(fresh)
 	}
@@ -295,36 +307,51 @@ func (e *Engine) stopTask(ctx context.Context, task *model.ScheduleTask, now tim
 		return nil // task was deleted
 	}
 
-	// Update execution history
+	// Update or create execution history
+	isNormalEnd := reason == "stream ended"
 	execs, err := e.store.GetExecutions(fresh.ID, 1)
-	if err == nil && len(execs) > 0 {
+	if err == nil && len(execs) > 0 && execs[0].State == model.StateRecording {
 		exec := execs[0]
 		exec.EndTime = &now
 		exec.State = model.StateCompleted
-		exec.Error = reason
+		if !isNormalEnd {
+			exec.Error = reason
+		}
 		if err := e.store.UpdateExecution(exec); err != nil {
 			log.Printf("[cron] update execution for task %d error: %v", fresh.ID, err)
+		}
+	} else {
+		// No active execution record — create one
+		exec := &model.TaskExecution{
+			TaskID:    fresh.ID,
+			StartTime: now,
+			EndTime:   &now,
+			State:     model.StateCompleted,
+		}
+		if !isNormalEnd {
+			exec.Error = reason
+		}
+		if err := e.store.AddExecution(exec); err != nil {
+			log.Printf("[cron] add execution for task %d error: %v", fresh.ID, err)
 		}
 	}
 
 	fresh.State = model.StateCompleted
-	fresh.LastError = reason
+	if !isNormalEnd {
+		fresh.LastError = reason
+	}
 	fresh.CurrentScheduleIdx = -1
 	return e.store.Update(fresh)
 }
 
-func (e *Engine) rescheduleTasks(now time.Time) error {
-	// Only load tasks in states that need rescheduling
-	tasks, err := e.store.List("", nil)
+func (e *Engine) rescheduleTasks(now time.Time) {
+	tasks, err := e.store.GetReschedulableTasks()
 	if err != nil {
-		return fmt.Errorf("list tasks: %w", err)
+		log.Printf("[cron] get reschedulable tasks error: %v", err)
+		return
 	}
 
 	for _, task := range tasks {
-		if !task.Enabled {
-			continue
-		}
-
 		e.store.TaskMu.Lock()
 		// Re-read from DB to get fresh state (fireTask or API may have changed it)
 		fresh, err := e.store.Get(task.ID)
@@ -339,7 +366,6 @@ func (e *Engine) rescheduleTasks(now time.Time) error {
 		e.rescheduleOneTask(fresh, now)
 		e.store.TaskMu.Unlock()
 	}
-	return nil
 }
 
 func (e *Engine) rescheduleOneTask(task *model.ScheduleTask, now time.Time) {

@@ -80,7 +80,7 @@ func (c *BiliAPI) StopRecording(ctx context.Context, roomID string) error {
 }
 
 func (c *BiliAPI) HealthCheck(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/info", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/lives", nil)
 	if err != nil {
 		return err
 	}

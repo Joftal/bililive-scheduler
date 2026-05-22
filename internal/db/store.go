@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -168,6 +169,29 @@ func (s *Store) GetRecordingTasks() ([]*model.ScheduleTask, error) {
 	return tasks, rows.Err()
 }
 
+func (s *Store) GetReschedulableTasks() ([]*model.ScheduleTask, error) {
+	rows, err := s.db.Query(
+		`SELECT `+taskColumns+`
+		 FROM schedule_tasks
+		 WHERE enabled = 1 AND state IN ('completed', 'pending', 'error')
+		 ORDER BY id ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query reschedulable tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*model.ScheduleTask
+	for rows.Next() {
+		t, err := scanTaskFrom(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
 func (s *Store) GetCounts() (total, recording, waiting, errored int, err error) {
 	err = s.db.QueryRow(`
 		SELECT COUNT(*),
@@ -264,6 +288,7 @@ func parseSchedules(s string) []model.ScheduleEntry {
 	}
 	var entries []model.ScheduleEntry
 	if err := json.Unmarshal([]byte(s), &entries); err != nil {
+		log.Printf("[db] parse schedules JSON error: %v (input: %q)", err, s)
 		return []model.ScheduleEntry{}
 	}
 	if entries == nil {

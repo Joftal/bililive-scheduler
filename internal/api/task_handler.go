@@ -300,6 +300,18 @@ func (s *Server) disableTask(w http.ResponseWriter, r *http.Request) {
 		} else {
 			task.State = model.StateCompleted
 			task.LastError = "stopped by disable"
+			// Update execution history
+			now := time.Now()
+			execs, _ := s.store.GetExecutions(task.ID, 1)
+			if len(execs) > 0 && execs[0].State == model.StateRecording {
+				exec := execs[0]
+				exec.EndTime = &now
+				exec.State = model.StateCompleted
+				exec.Error = "stopped by disable"
+				if err := s.store.UpdateExecution(exec); err != nil {
+					log.Printf("[api] update execution for task %d error: %v", task.ID, err)
+				}
+			}
 		}
 	}
 

@@ -121,11 +121,32 @@ func stopActiveRecordings(ctx context.Context, store *db.Store, client *client.B
 	if err != nil {
 		return err
 	}
+	now := time.Now()
 	for _, task := range tasks {
 		log.Printf("[shutdown] stopping recording for task %d (room %s)", task.ID, task.RoomID)
 		if err := client.StopRecording(ctx, task.RoomID); err != nil {
 			log.Printf("[shutdown] stop task %d error: %v", task.ID, err)
 		}
+		// Update DB state
+		store.TaskMu.Lock()
+		task.State = "completed"
+		task.LastError = "stopped by shutdown"
+		task.CurrentScheduleIdx = -1
+		if updateErr := store.Update(task); updateErr != nil {
+			log.Printf("[shutdown] update task %d error: %v", task.ID, updateErr)
+		}
+		// Update execution history
+		execs, _ := store.GetExecutions(task.ID, 1)
+		if len(execs) > 0 && execs[0].State == "recording" {
+			exec := execs[0]
+			exec.EndTime = &now
+			exec.State = "completed"
+			exec.Error = "stopped by shutdown"
+			if err := store.UpdateExecution(exec); err != nil {
+				log.Printf("[shutdown] update execution for task %d error: %v", task.ID, err)
+			}
+		}
+		store.TaskMu.Unlock()
 	}
 	return nil
 }
