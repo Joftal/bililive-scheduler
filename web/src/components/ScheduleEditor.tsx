@@ -115,7 +115,7 @@ export default function ScheduleEditor({ value = [], onChange }: Props) {
                   updateEntry(index, { start_time: time ? time.format('HH:mm') : '' })
                 }
                 allowClear={false}
-                minuteStep={5}
+                changeOnBlur
               />
             </div>
             <div className="entry-field">
