@@ -57,7 +57,8 @@
 .entry-row-inline {
   display: flex;
   gap: 24px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
 }
 
 .entry-field {
