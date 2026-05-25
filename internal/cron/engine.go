@@ -211,7 +211,7 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 		fresh.State = model.StateRecording
 		fresh.CurrentLiveStart = &now
 		fresh.LastError = ""
-		fresh.MonitorUntil = nil
+		// Keep MonitorUntil — used to detect reconnection window if stream drops
 		if len(fresh.Schedules) > 0 {
 			fresh.CurrentScheduleIdx = fresh.NextFireScheduleIdx
 		}
@@ -250,7 +250,13 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 	fresh.CurrentLiveStart = &now
 	fresh.LastError = ""
 	fresh.RetryCount = 0
-	fresh.MonitorUntil = nil
+	// Set or keep MonitorUntil for reconnection window if stream drops later
+	if fresh.MonitorUntil == nil {
+		if monitorMin := fresh.GetEffectiveMonitorMin(fresh.NextFireScheduleIdx); monitorMin > 0 {
+			monitorEnd := fresh.NextFireAt.Add(time.Duration(monitorMin) * time.Minute)
+			fresh.MonitorUntil = &monitorEnd
+		}
+	}
 	// Set CurrentScheduleIdx from NextFireScheduleIdx
 	if len(fresh.Schedules) > 0 {
 		fresh.CurrentScheduleIdx = fresh.NextFireScheduleIdx
@@ -358,6 +364,19 @@ func (e *Engine) stopTask(ctx context.Context, task *model.ScheduleTask, now tim
 		if err := e.store.AddExecution(exec); err != nil {
 			log.Printf("[cron] add execution for task %d error: %v", fresh.ID, err)
 		}
+	}
+
+	// If stream ended naturally and still within the monitoring window,
+	// enter monitoring mode to wait for reconnection instead of completing.
+	if isNormalEnd && fresh.MonitorUntil != nil && now.Before(*fresh.MonitorUntil) {
+		log.Printf("[cron] task %d: room %s stream dropped, monitoring for reconnection until %s",
+			fresh.ID, fresh.RoomID, fresh.MonitorUntil.Format("15:04:05"))
+		tickDur := time.Duration(e.interval.Load()) * time.Second
+		nextTick := now.Add(tickDur)
+		fresh.NextFireAt = &nextTick
+		fresh.State = model.StateWaiting
+		fresh.CurrentScheduleIdx = -1
+		return e.store.Update(fresh)
 	}
 
 	fresh.State = model.StateCompleted
