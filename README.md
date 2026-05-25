@@ -1,6 +1,7 @@
 # Bililive Scheduler
 
 Bililive-go 的定时录制调度工具。通过 bililive-go 的 REST API 实现定时录制任务的管理，不直接连接任何直播平台。
+<img width="1335" height="414" alt="image" src="https://github.com/user-attachments/assets/9f3ca73b-a693-48a8-b177-cbdf2eb70290" />
 
 ## 功能
 
