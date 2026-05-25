@@ -113,6 +113,9 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		task.NextFireAt = next
 		task.NextFireScheduleIdx = schedIdx
 		task.State = model.StateWaiting
+		log.Printf("[api] createTask: computed NextFireAt=%s, schedIdx=%d", next.Format("2006-01-02 15:04:05"), schedIdx)
+	} else {
+		log.Printf("[api] createTask: NextScheduleAfter error: %v", err)
 	}
 
 	if err := s.store.Create(task); err != nil {

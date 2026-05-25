@@ -130,6 +130,14 @@ func (e *Engine) fireDueTasks(ctx context.Context, now time.Time) {
 	}
 
 	for _, task := range tasks {
+		log.Printf("[cron] fireDueTasks: task %d (%s) state=%s next_fire_at=%v",
+			task.ID, task.Name, task.State,
+			func() string {
+				if task.NextFireAt != nil {
+					return task.NextFireAt.Format("2006-01-02 15:04:05")
+				}
+				return "nil"
+			}())
 		if err := e.fireTask(ctx, task, now); err != nil {
 			log.Printf("[cron] fire task %d (%s) error: %v", task.ID, task.Name, err)
 			e.store.TaskMu.Lock()
