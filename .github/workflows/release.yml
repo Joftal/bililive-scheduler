@@ -1,0 +1,151 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g. v0.1.0)"
+        required: true
+        default: "v0.1.0"
+        type: string
+      update_tag:
+        description: "Overwrite existing tag (force push to HEAD)"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { os: darwin,  arch: amd64 }
+          - { os: darwin,  arch: arm64 }
+          - { os: linux,   arch: amd64 }
+          - { os: linux,   arch: arm64 }
+          - { os: linux,   arch: arm   }
+          - { os: windows, arch: amd64 }
+          - { os: windows, arch: 386   }
+          - { os: windows, arch: arm64 }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build frontend
+        working-directory: web
+        run: npm ci && npm run build
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: "0"
+        run: |
+          ext=""
+          if [ "$GOOS" = "windows" ]; then
+            ext=".exe"
+          fi
+          go build -ldflags="-s -w" -o "bililive-scheduler${ext}" ./cmd/scheduler/
+
+      - name: Package (Unix)
+        if: matrix.os != 'windows'
+        run: |
+          zip "bililive-scheduler-${{ matrix.os }}-${{ matrix.arch }}.zip" bililive-scheduler
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows'
+        run: |
+          7z a "bililive-scheduler-${{ matrix.os }}-${{ matrix.arch }}.zip" bililive-scheduler.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bililive-scheduler-${{ matrix.os }}-${{ matrix.arch }}
+          path: bililive-scheduler-${{ matrix.os }}-${{ matrix.arch }}.zip
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: artifacts
+
+      - name: Handle tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          UPDATE_TAG: ${{ inputs.update_tag }}
+        run: |
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            # Tag exists
+            if [ "$UPDATE_TAG" = "true" ]; then
+              echo "Force updating existing tag $VERSION to HEAD"
+              git tag -f "$VERSION"
+              git push --force origin "$VERSION"
+            else
+              echo "::error::Tag $VERSION already exists. Check 'Overwrite existing tag' to force update."
+              exit 1
+            fi
+          else
+            # Tag does not exist
+            echo "Creating new tag $VERSION"
+            git tag "$VERSION"
+            git push origin "$VERSION"
+          fi
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          # Get previous tag (the one before current $VERSION)
+          PREV_TAG=$(git describe --tags --abbrev=0 "$VERSION^" 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            COMMITS=$(git log "${PREV_TAG}..${VERSION}" --pretty=format:"- %s (%h)" 2>/dev/null || echo "")
+          else
+            COMMITS=$(git log "$VERSION" --pretty=format:"- %s (%h)" 2>/dev/null || echo "")
+          fi
+          if [ -z "$COMMITS" ]; then
+            COMMITS="- Initial release"
+          fi
+          # Write to file to handle multiline safely
+          {
+            echo "## Changes"
+            echo ""
+            echo "$COMMITS"
+          } > release_notes.md
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          gh release create "$VERSION" \
+            --repo "${{ github.repository }}" \
+            --title "$VERSION" \
+            --notes-file release_notes.md \
+            --latest \
+            artifacts/*.zip
