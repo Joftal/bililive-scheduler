@@ -177,7 +177,9 @@ export default function TaskList() {
       dataIndex: 'state',
       width: 100,
       render: (state: ScheduleTask['state'], r: ScheduleTask) => (
-        <StatusBadge state={state} enabled={r.enabled} />
+        <Tooltip title={r.last_error || undefined}>
+          <StatusBadge state={state} enabled={r.enabled} />
+        </Tooltip>
       ),
     },
     {
@@ -191,7 +193,7 @@ export default function TaskList() {
       dataIndex: 'enabled',
       width: 60,
       render: (enabled: boolean, r: ScheduleTask) => (
-        <Switch checked={enabled} onChange={() => handleToggle(r)} size="small" disabled={r.state === 'recording'} />
+        <Switch checked={enabled} onChange={() => handleToggle(r)} size="small" />
       ),
     },
     {
@@ -201,7 +203,7 @@ export default function TaskList() {
         const isRecording = r.state === 'recording';
         return (
           <Space size="small">
-            <Button size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); navigate(`/tasks/${r.id}/edit`); }} disabled={isRecording} />
+            <Button size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); navigate(`/tasks/${r.id}/edit`); }} />
             {r.state === 'error' && (
               <Button size="small" icon={<RedoOutlined />} onClick={(e) => { e.stopPropagation(); handleRetry(r.id); }} type="primary" danger>
                 重试
