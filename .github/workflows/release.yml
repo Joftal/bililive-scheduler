@@ -146,7 +146,7 @@ jobs:
           # Delete existing release if present (tag was already updated in previous step)
           if gh release view "$VERSION" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             echo "Deleting existing release $VERSION"
-            gh release delete "$VERSION" --repo "${{ github.repository }}" --yes --keep-tag
+            gh release delete "$VERSION" --repo "${{ github.repository }}" --yes
           fi
           gh release create "$VERSION" \
             --repo "${{ github.repository }}" \
