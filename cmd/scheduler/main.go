@@ -22,6 +22,14 @@ import (
 )
 
 func main() {
+	// Handle --version before flag.Parse() so it exits immediately
+	for _, arg := range os.Args[1:] {
+		if arg == "--version" || arg == "-version" {
+			fmt.Println(config.DefaultVersion)
+			return
+		}
+	}
+
 	cfg := config.Parse()
 
 	if err := cfg.Validate(); err != nil {

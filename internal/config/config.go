@@ -8,6 +8,8 @@ import (
 	"runtime"
 )
 
+const DefaultVersion = "0.1.0"
+
 type Config struct {
 	Port           int
 	APIURL         string
@@ -27,7 +29,7 @@ func Parse() *Config {
 	flag.StringVar(&cfg.APIURL, "api-url", "http://localhost:8080", "bililive-go API base URL")
 	flag.StringVar(&cfg.DBPath, "db-path", "", "SQLite database path")
 	flag.StringVar(&cfg.LogLevel, "log-level", "info", "Log level (debug, info, warn, error)")
-	flag.StringVar(&cfg.Version, "version", "0.1.0", "Version string")
+	flag.StringVar(&cfg.Version, "version", DefaultVersion, "Version string")
 	flag.StringVar(&cfg.APIKey, "api-key", "", "API key for authentication (empty = disabled)")
 	flag.StringVar(&cfg.AllowedOrigins, "allowed-origins", "*", "Comma-separated list of allowed CORS origins (\"*\" = allow all)")
 	flag.Float64Var(&cfg.RateLimit, "rate-limit", 30, "Rate limit per IP (requests/second, 0 = disabled)")

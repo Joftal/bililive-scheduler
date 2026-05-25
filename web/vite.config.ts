@@ -6,7 +6,10 @@ export default defineConfig({
   base: '/scheduler/',
   server: {
     proxy: {
-      '/api': 'http://localhost:9090',
+      '/scheduler/api': {
+        target: 'http://localhost:9090',
+        rewrite: (path) => path.replace(/^\/scheduler/, ''),
+      },
     },
   },
   build: {
