@@ -13,10 +13,6 @@ import (
 	"github.com/kira1928/bililive-scheduler/internal/model"
 )
 
-// Grace period before stopping a recording when the stream goes offline.
-// This handles brief disconnections common on platforms like Bilibili.
-const streamOfflineGracePeriod = 60 * time.Second
-
 type Engine struct {
 	store    *db.Store
 	client   *client.BiliAPI
@@ -26,10 +22,6 @@ type Engine struct {
 	running bool
 	startAt time.Time
 	cancel  context.CancelFunc
-
-	// Tracks when a recording room first went offline (task ID → first offline time).
-	// Used to implement a grace period before stopping recordings on transient disconnects.
-	offlineSince map[int64]time.Time
 }
 
 func NewEngine(store *db.Store, client *client.BiliAPI, interval int) *Engine {
@@ -37,9 +29,8 @@ func NewEngine(store *db.Store, client *client.BiliAPI, interval int) *Engine {
 		interval = 15
 	}
 	e := &Engine{
-		store:        store,
-		client:       client,
-		offlineSince: make(map[int64]time.Time),
+		store:  store,
+		client: client,
 	}
 	e.interval.Store(int32(interval))
 	return e
@@ -318,34 +309,14 @@ func (e *Engine) checkRecording(ctx context.Context, task *model.ScheduleTask, n
 	}
 
 	if !isLive {
-		// Apply grace period for transient disconnects
-		if firstOffline, exists := e.offlineSince[task.ID]; exists {
-			if now.Sub(firstOffline) < streamOfflineGracePeriod {
-				log.Printf("[cron] task %d: room %s offline for %s, within grace period (%s), continuing",
-					task.ID, task.RoomID, now.Sub(firstOffline).Round(time.Second), streamOfflineGracePeriod)
-				return nil
-			}
-			// Grace period exceeded — stop recording
-			log.Printf("[cron] task %d: room %s offline for %s, grace period exceeded, stopping",
-				task.ID, task.RoomID, now.Sub(firstOffline).Round(time.Second))
-			delete(e.offlineSince, task.ID)
-			return e.stopTask(ctx, task, now, "stream ended")
-		}
-		// First time seeing offline — record timestamp and wait
-		log.Printf("[cron] task %d: room %s went offline, starting grace period", task.ID, task.RoomID)
-		e.offlineSince[task.ID] = now
-		return nil
+		log.Printf("[cron] task %d: stream ended naturally", task.ID)
+		return e.stopTask(ctx, task, now, "stream ended")
 	}
-
-	// Room is back online — clear offline tracking
-	delete(e.offlineSince, task.ID)
 
 	return nil
 }
 
 func (e *Engine) stopTask(ctx context.Context, task *model.ScheduleTask, now time.Time, reason string) error {
-	delete(e.offlineSince, task.ID)
-
 	// Stop recording
 	if err := e.client.StopRecording(ctx, task.RoomID); err != nil {
 		log.Printf("[cron] task %d: stop recording error: %v (continuing)", task.ID, err)
