@@ -36,11 +36,14 @@ func (s *Store) Create(t *model.ScheduleTask) error {
 	}
 	result, err := s.db.Exec(
 		`INSERT INTO schedule_tasks (name, room_id, room_url, enabled, state,
-		  max_retries, created_at, updated_at, schedules, current_schedule_idx, next_fire_schedule_idx)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		  next_fire_at, next_fire_schedule_idx,
+		  max_retries, created_at, updated_at, schedules, current_schedule_idx)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.Name, t.RoomID, t.RoomURL,
-		boolToInt(t.Enabled), string(t.State), t.MaxRetries, t.CreatedAt, t.UpdatedAt,
-		string(schedulesJSON), t.CurrentScheduleIdx, t.NextFireScheduleIdx,
+		boolToInt(t.Enabled), string(t.State),
+		t.NextFireAt, t.NextFireScheduleIdx,
+		t.MaxRetries, t.CreatedAt, t.UpdatedAt,
+		string(schedulesJSON), t.CurrentScheduleIdx,
 	)
 	if err != nil {
 		return fmt.Errorf("insert task: %w", err)
