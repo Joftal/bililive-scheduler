@@ -109,14 +109,14 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Compute initial NextFireAt so the task doesn't fire immediately
-	if next, schedIdx, err := cron.NextScheduleAfter(task.Schedules, time.Now()); err == nil {
-		task.NextFireAt = next
-		task.NextFireScheduleIdx = schedIdx
-		task.State = model.StateWaiting
-		log.Printf("[api] createTask: computed NextFireAt=%s, schedIdx=%d", next.Format("2006-01-02 15:04:05"), schedIdx)
-	} else {
-		log.Printf("[api] createTask: NextScheduleAfter error: %v", err)
+	next, schedIdx, err := cron.NextScheduleAfter(task.Schedules, time.Now())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to compute next fire time: "+err.Error())
+		return
 	}
+	task.NextFireAt = next
+	task.NextFireScheduleIdx = schedIdx
+	task.State = model.StateWaiting
 
 	if err := s.store.Create(task); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

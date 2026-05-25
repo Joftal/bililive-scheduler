@@ -130,14 +130,6 @@ func (e *Engine) fireDueTasks(ctx context.Context, now time.Time) {
 	}
 
 	for _, task := range tasks {
-		log.Printf("[cron] fireDueTasks: task %d (%s) state=%s next_fire_at=%v",
-			task.ID, task.Name, task.State,
-			func() string {
-				if task.NextFireAt != nil {
-					return task.NextFireAt.Format("2006-01-02 15:04:05")
-				}
-				return "nil"
-			}())
 		if err := e.fireTask(ctx, task, now); err != nil {
 			log.Printf("[cron] fire task %d (%s) error: %v", task.ID, task.Name, err)
 			e.store.TaskMu.Lock()
@@ -197,6 +189,15 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 			// Monitoring mode: keep checking within the monitoring window
 			if fresh.MonitorUntil == nil {
 				// First check — set monitoring window from the scheduled fire time
+				if fresh.NextFireAt == nil {
+					// NextFireAt not set — compute it now
+					next, schedIdx, err := nextFireTime(fresh, now)
+					if err != nil {
+						return fmt.Errorf("compute next fire for nil NextFireAt: %w", err)
+					}
+					fresh.NextFireAt = next
+					fresh.NextFireScheduleIdx = schedIdx
+				}
 				monitorEnd := fresh.NextFireAt.Add(time.Duration(monitorMin) * time.Minute)
 				fresh.MonitorUntil = &monitorEnd
 			}
@@ -273,8 +274,10 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 	// Set or keep MonitorUntil for reconnection window if stream drops later
 	if fresh.MonitorUntil == nil {
 		if monitorMin := fresh.GetEffectiveMonitorMin(fresh.NextFireScheduleIdx); monitorMin > 0 {
-			monitorEnd := fresh.NextFireAt.Add(time.Duration(monitorMin) * time.Minute)
-			fresh.MonitorUntil = &monitorEnd
+			if fresh.NextFireAt != nil {
+				monitorEnd := fresh.NextFireAt.Add(time.Duration(monitorMin) * time.Minute)
+				fresh.MonitorUntil = &monitorEnd
+			}
 		}
 	}
 	// Set CurrentScheduleIdx from NextFireScheduleIdx
