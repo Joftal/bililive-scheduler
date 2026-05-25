@@ -203,7 +203,7 @@ export default function TaskList() {
         const isRecording = r.state === 'recording';
         return (
           <Space size="small">
-            <Button size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); navigate(`/tasks/${r.id}/edit`); }} />
+            <Button size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); navigate(`/tasks/${r.id}/edit`); }} disabled={isRecording} />
             {r.state === 'error' && (
               <Button size="small" icon={<RedoOutlined />} onClick={(e) => { e.stopPropagation(); handleRetry(r.id); }} type="primary" danger>
                 重试
