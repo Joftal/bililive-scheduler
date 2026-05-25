@@ -5,10 +5,7 @@ import (
 	"time"
 
 	"github.com/kira1928/bililive-scheduler/internal/model"
-	cronlib "github.com/robfig/cron/v3"
 )
-
-var parser = cronlib.NewParser(cronlib.Minute | cronlib.Hour | cronlib.Dom | cronlib.Month | cronlib.Dow)
 
 // NextScheduleAfter finds the earliest next fire time across all schedule entries.
 // Returns the fire time and the index of the entry that produces it.
@@ -24,7 +21,7 @@ func NextScheduleAfter(entries []model.ScheduleEntry, from time.Time) (*time.Tim
 		if entry.CronExpr == "" {
 			continue
 		}
-		schedule, err := parser.Parse(entry.CronExpr)
+		schedule, err := model.CronParser.Parse(entry.CronExpr)
 		if err != nil {
 			continue
 		}

@@ -67,14 +67,16 @@ func (e *Engine) Start(ctx context.Context) error {
 
 	for {
 		d := time.Duration(e.interval.Load()) * time.Second
+		t := time.NewTimer(d)
 		select {
 		case <-ctx.Done():
+			t.Stop()
 			e.mu.Lock()
 			e.running = false
 			e.mu.Unlock()
 			log.Printf("[cron] engine stopped")
 			return nil
-		case <-time.After(d):
+		case <-t.C:
 			e.evaluate(ctx)
 		}
 	}
@@ -170,7 +172,7 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 	}
 
 	if !isLive {
-		monitorMin := fresh.GetEffectiveMonitorMin(fresh.CurrentScheduleIdx)
+		monitorMin := fresh.GetEffectiveMonitorMin(fresh.NextFireScheduleIdx)
 		if monitorMin > 0 {
 			// Monitoring mode: keep checking within the monitoring window
 			if fresh.MonitorUntil == nil {

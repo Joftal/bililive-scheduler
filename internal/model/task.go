@@ -10,7 +10,7 @@ import (
 	cronlib "github.com/robfig/cron/v3"
 )
 
-var cronParser = cronlib.NewParser(cronlib.Minute | cronlib.Hour | cronlib.Dom | cronlib.Month | cronlib.Dow)
+var CronParser = cronlib.NewParser(cronlib.Minute | cronlib.Hour | cronlib.Dom | cronlib.Month | cronlib.Dow)
 
 var timeRegex = regexp.MustCompile(`^([01]\d|2[0-3]):([0-5]\d)$`)
 
@@ -122,7 +122,7 @@ func generateCronForEntry(entry ScheduleEntry) (string, error) {
 
 	expr := fmt.Sprintf("%s %s * * %s", minute, hour, strings.Join(dayStrs, ","))
 
-	if _, err := cronParser.Parse(expr); err != nil {
+	if _, err := CronParser.Parse(expr); err != nil {
 		return "", fmt.Errorf("generated cron expression is invalid: %w", err)
 	}
 

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -575,23 +576,15 @@ func writeJSONWithStatus(w http.ResponseWriter, status int, v any) {
 func writeError(w http.ResponseWriter, status int, msg string) {
 	if status >= 400 {
 		log.Printf("[api] error (status %d): %s", status, msg)
-	}
-	if status >= 400 {
 		msg = sanitizeErrorMessage(msg)
 	}
 	writeJSONWithStatus(w, status, map[string]string{"error": msg})
 }
 
+var urlPrefixRegex = regexp.MustCompile(`https?://[^\s/]+`)
+
 func sanitizeErrorMessage(msg string) string {
-	replacements := []string{
-		"http://", "",
-		"https://", "",
-		"localhost", "upstream",
-	}
-	for i := 0; i < len(replacements)-1; i += 2 {
-		msg = strings.ReplaceAll(msg, replacements[i], replacements[i+1])
-	}
-	return msg
+	return urlPrefixRegex.ReplaceAllString(msg, "upstream")
 }
 
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
@@ -710,14 +703,6 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 }
 
 func extractIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if parts := strings.SplitN(xff, ",", 2); len(parts) > 0 {
-			return strings.TrimSpace(parts[0])
-		}
-	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
-	}
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
 	return host
 }

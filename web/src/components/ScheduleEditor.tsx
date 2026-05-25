@@ -26,7 +26,8 @@ function generateCron(days: number[], startTime: string): string {
   if (parts.length !== 2) return '';
   const [hour, minute] = parts;
   const sortedDays = [...days].sort((a, b) => a - b);
-  return `${minute} ${hour} * * ${sortedDays.join(',')}`;
+  const cronDays = sortedDays.map(d => d % 7); // ISO 8601 (7=Sun) → cron (0=Sun)
+  return `${minute} ${hour} * * ${cronDays.join(',')}`;
 }
 
 function findDuplicateConflicts(entries: ScheduleEntry[]): string[] {
