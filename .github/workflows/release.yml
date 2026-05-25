@@ -102,7 +102,8 @@ jobs:
           UPDATE_TAG: ${{ inputs.update_tag }}
         run: |
           if git rev-parse "$VERSION" >/dev/null 2>&1; then
-            # Tag exists
+            # Tag exists — save old position for release notes
+            git rev-parse "$VERSION" > /tmp/old_tag_sha
             if [ "$UPDATE_TAG" = "true" ]; then
               echo "Force updating existing tag $VERSION to HEAD"
               git tag -f "$VERSION"
@@ -113,6 +114,7 @@ jobs:
             fi
           else
             # Tag does not exist
+            echo "" > /tmp/old_tag_sha
             echo "Creating new tag $VERSION"
             git tag "$VERSION"
             git push origin "$VERSION"
@@ -121,17 +123,20 @@ jobs:
       - name: Generate release notes
         id: notes
         run: |
-          # Get previous tag (the one before current $VERSION)
-          PREV_TAG=$(git describe --tags --abbrev=0 "$VERSION^" 2>/dev/null || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            COMMITS=$(git log "${PREV_TAG}..${VERSION}" --pretty=format:"- %s (%h)" 2>/dev/null || echo "")
+          # Fetch the updated tag reference
+          git fetch origin tag "$VERSION" --force 2>/dev/null || true
+          OLD_SHA=$(cat /tmp/old_tag_sha | tr -d '[:space:]')
+          NEW_SHA=$(git rev-parse "$VERSION" 2>/dev/null || echo "")
+          if [ -n "$OLD_SHA" ] && [ -n "$NEW_SHA" ] && [ "$OLD_SHA" != "$NEW_SHA" ]; then
+            # Tag was updated — show commits from old position to new
+            COMMITS=$(git log "${OLD_SHA}..${NEW_SHA}" --pretty=format:"- %s (%h)" 2>/dev/null || echo "")
           else
+            # New tag — show all commits
             COMMITS=$(git log "$VERSION" --pretty=format:"- %s (%h)" 2>/dev/null || echo "")
           fi
           if [ -z "$COMMITS" ]; then
-            COMMITS="- Initial release"
+            COMMITS="- No changes"
           fi
-          # Write to file to handle multiline safely
           {
             echo "## Changes"
             echo ""
