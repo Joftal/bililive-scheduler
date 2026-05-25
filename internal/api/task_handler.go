@@ -108,6 +108,13 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Compute initial NextFireAt so the task doesn't fire immediately
+	if next, schedIdx, err := cron.NextScheduleAfter(task.Schedules, time.Now()); err == nil {
+		task.NextFireAt = next
+		task.NextFireScheduleIdx = schedIdx
+		task.State = model.StateWaiting
+	}
+
 	if err := s.store.Create(task); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
