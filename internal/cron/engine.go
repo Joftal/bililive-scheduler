@@ -2,6 +2,7 @@ package cron
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -152,6 +153,17 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 	// Check if room is live (HTTP call, do outside lock)
 	isLive, isRecording, err := e.client.GetRoomStatus(ctx, task.RoomID)
 	if err != nil {
+		if errors.Is(err, client.ErrRoomNotFound) {
+			// Room was deleted in bililive-go — remove the task
+			log.Printf("[cron] task %d: room %s not found, deleting task", task.ID, task.RoomID)
+			e.store.TaskMu.Lock()
+			deleteErr := e.store.Delete(task.ID)
+			e.store.TaskMu.Unlock()
+			if deleteErr != nil {
+				log.Printf("[cron] delete task %d error: %v", task.ID, deleteErr)
+			}
+			return nil
+		}
 		return fmt.Errorf("get room status: %w", err)
 	}
 

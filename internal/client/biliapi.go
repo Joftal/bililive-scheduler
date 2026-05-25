@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,10 @@ import (
 	"strings"
 	"time"
 )
+
+var ErrRoomNotFound = errors.New("room not found")
+
+var errNotFound = errors.New("not found")
 
 type BiliAPI struct {
 	baseURL    string
@@ -65,6 +70,9 @@ func (c *BiliAPI) GetRooms(ctx context.Context) ([]RoomInfo, error) {
 func (c *BiliAPI) GetRoomStatus(ctx context.Context, roomID string) (isLive, isRecording bool, err error) {
 	var info liveInfo
 	if err := c.getJSON(ctx, "/api/lives/"+url.PathEscape(roomID), &info); err != nil {
+		if errors.Is(err, errNotFound) {
+			return false, false, ErrRoomNotFound
+		}
 		return false, false, err
 	}
 	return info.Status, info.Recording, nil
@@ -128,6 +136,9 @@ func (c *BiliAPI) getJSON(ctx context.Context, path string, target any) error {
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("GET %s returned status 404: %w", path, errNotFound)
+		}
 		return fmt.Errorf("GET %s returned status %d: %s", path, resp.StatusCode, string(body))
 	}
 
