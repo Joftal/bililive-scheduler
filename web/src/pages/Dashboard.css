@@ -214,6 +214,20 @@
   margin-top: 8px;
 }
 
+/* Help section */
+.help-section + .help-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.help-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.85);
+  margin-bottom: 8px;
+}
+
 /* Help list */
 .help-list {
   list-style: none;

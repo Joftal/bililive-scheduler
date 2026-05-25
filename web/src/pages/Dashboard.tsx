@@ -164,11 +164,23 @@ export default function Dashboard() {
               <h5><QuestionCircleOutlined style={{ marginRight: 6, fontSize: 14 }} />快速说明</h5>
             </div>
             <div className="panel-body">
-              <ul className="help-list">
-                <li><strong>录制计划</strong>: 可视化设置录制时间段，选择星期、开始时间和时长，支持同一天多段录制</li>
-                <li><strong>录制时长</strong>: 每个时间段可独立设置，0 表示录制直到直播结束，正数表示指定分钟后自动停止</li>
-                <li><strong>自动重试</strong>: 任务失败后自动重试（指数退避），超过最大重试次数后进入错误状态</li>
-              </ul>
+              <div className="help-section">
+                <div className="help-title">参数说明</div>
+                <ul className="help-list">
+                  <li><strong>录制计划</strong>: 选择星期和开始时间，支持同一天多段录制，同一房间同一天的相同时段会自动检测冲突</li>
+                  <li><strong>录制时长</strong>: 0 = 录制直到主播下播，正数 = 录制指定分钟后自动停止（每次录制独立计时）</li>
+                  <li><strong>监控时长</strong>: 两个作用——① 触发时若房间未开播，在此时间内持续检测等待开播；② 录制中断流后，在监控窗口内自动等待主播重新开播并恢复录制</li>
+                  <li><strong>自动重试</strong>: 任务失败后按指数退避重试（1分→2分→4分…最长15分钟），超过最大重试次数后进入错误状态，需手动重试</li>
+                </ul>
+              </div>
+              <div className="help-section">
+                <div className="help-title">执行示例</div>
+                <ul className="help-list">
+                  <li>配置「周一 20:00，监控 30 分钟」→ 周一 20:00 触发，若房间未开播则每 15 秒检测一次，直到 20:30 前开播即开始录制</li>
+                  <li>配置「录制 120 分钟，监控 30 分钟」→ 20:00 开始录制，20:25 主播断流，20:28 重新开播，自动恢复录制，20:50 再次断流（已过 20:30 监控窗口）→ 录制结束</li>
+                  <li>不配置监控时长 → 触发时若未开播直接跳过，录制中断流立即停止，等待下次计划时间</li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>
