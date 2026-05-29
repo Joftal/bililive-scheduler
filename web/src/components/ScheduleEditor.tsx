@@ -30,16 +30,26 @@ function generateCron(days: number[], startTime: string): string {
   return `${minute} ${hour} * * ${cronDays.join(',')}`;
 }
 
+function timeToMinutes(t: string): number {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+
 function findDuplicateConflicts(entries: ScheduleEntry[]): string[] {
   const warnings: string[] = [];
   for (let i = 0; i < entries.length; i++) {
     for (let j = i + 1; j < entries.length; j++) {
-      if (entries[i].start_time === entries[j].start_time && entries[i].start_time) {
-        const overlap = entries[i].days.filter((d) => entries[j].days.includes(d));
-        if (overlap.length > 0) {
-          const dayNames = overlap.map((d) => DAY_OPTIONS.find(o => o.value === d)?.label ?? String(d)).join('、');
-          warnings.push(`时间段 ${i + 1} 和 ${j + 1} 在 ${dayNames} 的 ${entries[i].start_time} 重复`);
-        }
+      if (!entries[i].start_time || !entries[j].start_time) continue;
+      const startI = timeToMinutes(entries[i].start_time);
+      const startJ = timeToMinutes(entries[j].start_time);
+      const endI = entries[i].duration_min === 0 ? 24 * 60 : startI + entries[i].duration_min;
+      const endJ = entries[j].duration_min === 0 ? 24 * 60 : startJ + entries[j].duration_min;
+      if (startI >= endJ || startJ >= endI) continue;
+      const overlap = entries[i].days.filter((d) => entries[j].days.includes(d));
+      if (overlap.length > 0) {
+        const dayNames = overlap.map((d) => DAY_OPTIONS.find(o => o.value === d)?.label ?? String(d)).join('、');
+        const fmtEnd = (s: number, d: number) => d === 0 ? '持续' : `${String(Math.floor((s + d) / 60)).padStart(2, '0')}:${String((s + d) % 60).padStart(2, '0')}`;
+        warnings.push(`时间段 ${i + 1} (${entries[i].start_time}~${fmtEnd(startI, entries[i].duration_min)}) 和 ${j + 1} (${entries[j].start_time}~${fmtEnd(startJ, entries[j].duration_min)}) 在 ${dayNames} 时间重叠`);
       }
     }
   }

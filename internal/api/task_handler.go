@@ -536,11 +536,28 @@ func (s *Server) findScheduleConflict(roomID string, schedules []model.ScheduleE
 			if newEntry.StartTime == "" {
 				continue
 			}
+			startA, okA := parseTimeToMinutes(newEntry.StartTime)
+			if !okA {
+				continue
+			}
+			endA := startA + newEntry.DurationMin
+			if newEntry.DurationMin == 0 {
+				endA = 24 * 60
+			}
 			for _, oldEntry := range other.Schedules {
 				if oldEntry.StartTime == "" {
 					continue
 				}
-				if newEntry.StartTime != oldEntry.StartTime {
+				startB, okB := parseTimeToMinutes(oldEntry.StartTime)
+				if !okB {
+					continue
+				}
+				endB := startB + oldEntry.DurationMin
+				if oldEntry.DurationMin == 0 {
+					endB = 24 * 60
+				}
+				// [startA, endA) ∩ [startB, endB) = ∅ ?
+				if startA >= endB || startB >= endA {
 					continue
 				}
 				overlap := dayOverlap(newEntry.Days, oldEntry.Days)
@@ -550,13 +567,39 @@ func (s *Server) findScheduleConflict(roomID string, schedules []model.ScheduleE
 					for i, d := range overlap {
 						dayNames[i] = isoDayNames[d]
 					}
-					return fmt.Sprintf("与任务 #%d 在周%s的 %s 时间冲突",
-						other.ID, strings.Join(dayNames, "、"), newEntry.StartTime)
+					return fmt.Sprintf("与任务 #%d 在周%s的 %s~%s 与 %s~%s 时间重叠",
+						other.ID, strings.Join(dayNames, "、"),
+						newEntry.StartTime, formatEndTime(startA, newEntry.DurationMin),
+						oldEntry.StartTime, formatEndTime(startB, oldEntry.DurationMin))
 				}
 			}
 		}
 	}
 	return ""
+}
+
+func parseTimeToMinutes(t string) (int, bool) {
+	parts := strings.Split(t, ":")
+	if len(parts) != 2 {
+		return 0, false
+	}
+	h, err := strconv.Atoi(parts[0])
+	if err != nil || h < 0 || h > 23 {
+		return 0, false
+	}
+	m, err := strconv.Atoi(parts[1])
+	if err != nil || m < 0 || m > 59 {
+		return 0, false
+	}
+	return h*60 + m, true
+}
+
+func formatEndTime(startMin, durationMin int) string {
+	if durationMin == 0 {
+		return "持续"
+	}
+	endMin := startMin + durationMin
+	return fmt.Sprintf("%02d:%02d", endMin/60, endMin%60)
 }
 
 func dayOverlap(a, b []int) []int {
