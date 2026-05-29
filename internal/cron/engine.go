@@ -195,21 +195,36 @@ func (e *Engine) fireTask(ctx context.Context, task *model.ScheduleTask, now tim
 		return nil // task state changed, skip
 	}
 
+	// Don't fire a task that isn't actually due yet.
+	// Defense-in-depth: GetDueTasks already filters by state and NextFireAt,
+	// but this catches edge cases (e.g. stale data from the query snapshot).
+	if fresh.NextFireAt == nil || now.Before(*fresh.NextFireAt) {
+		return nil // not yet due
+	}
+
+	// If NextFireAt is significantly in the past (more than one tick interval),
+	// the service was likely down and missed the trigger. Reschedule to the
+	// next future fire time instead of catch-up firing.
+	tickDur := time.Duration(e.interval.Load()) * time.Second
+	if overdue := now.Sub(*fresh.NextFireAt); overdue > tickDur {
+		log.Printf("[cron] task %d: NextFireAt %s is %s in the past, rescheduling",
+			fresh.ID, fresh.NextFireAt.Format("15:04:05"), overdue.Round(time.Second))
+		next, schedIdx, err := nextFireTime(fresh, now)
+		if err != nil {
+			return fmt.Errorf("compute next fire for overdue task: %w", err)
+		}
+		fresh.NextFireAt = next
+		fresh.NextFireScheduleIdx = schedIdx
+		fresh.State = model.StateWaiting
+		return e.store.Update(fresh)
+	}
+
 	if !isLive {
 		monitorMin := fresh.GetEffectiveMonitorMin(fresh.NextFireScheduleIdx)
 		if monitorMin > 0 {
 			// Monitoring mode: keep checking within the monitoring window
 			if fresh.MonitorUntil == nil {
 				// First check — set monitoring window from the scheduled fire time
-				if fresh.NextFireAt == nil {
-					// NextFireAt not set — compute it now
-					next, schedIdx, err := nextFireTime(fresh, now)
-					if err != nil {
-						return fmt.Errorf("compute next fire for nil NextFireAt: %w", err)
-					}
-					fresh.NextFireAt = next
-					fresh.NextFireScheduleIdx = schedIdx
-				}
 				monitorEnd := fresh.NextFireAt.Add(time.Duration(monitorMin) * time.Minute)
 				fresh.MonitorUntil = &monitorEnd
 			}

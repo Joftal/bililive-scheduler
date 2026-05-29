@@ -132,7 +132,7 @@ func (s *Store) GetDueTasks(now time.Time) ([]*model.ScheduleTask, error) {
 	rows, err := s.db.Query(
 		`SELECT `+taskColumns+`
 		 FROM schedule_tasks
-		 WHERE enabled = 1 AND state IN ('pending', 'waiting') AND (next_fire_at IS NULL OR next_fire_at <= ?)
+		 WHERE enabled = 1 AND state = 'waiting' AND next_fire_at IS NOT NULL AND next_fire_at <= ?
 		 ORDER BY next_fire_at ASC`, now,
 	)
 	if err != nil {
