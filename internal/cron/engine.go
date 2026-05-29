@@ -422,8 +422,8 @@ func (e *Engine) checkRecording(ctx context.Context, task *model.ScheduleTask, n
 		return e.stopTask(ctx, task, now, "duration limit reached")
 	}
 
-	// Check if stream ended
-	isLive, _, err := e.client.GetRoomStatus(ctx, task.RoomID)
+	// Check if stream ended or recording stopped unexpectedly
+	isLive, isRecording, err := e.client.GetRoomStatus(ctx, task.RoomID)
 	if err != nil {
 		return fmt.Errorf("get room status: %w", err)
 	}
@@ -431,6 +431,11 @@ func (e *Engine) checkRecording(ctx context.Context, task *model.ScheduleTask, n
 	if !isLive {
 		log.Printf("[cron] task %d: stream ended naturally", task.ID)
 		return e.stopTask(ctx, task, now, "stream ended")
+	}
+
+	if !isRecording {
+		log.Printf("[cron] task %d: room %s is live but recording stopped unexpectedly", task.ID, task.RoomID)
+		return e.stopTask(ctx, task, now, "recording stopped unexpectedly")
 	}
 
 	return nil
