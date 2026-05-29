@@ -66,6 +66,12 @@ func (e *Engine) Start(ctx context.Context) error {
 	e.startAt = time.Now()
 	e.mu.Unlock()
 
+	// Recompute next_fire_at for all enabled tasks before the first tick.
+	// This prevents tasks with stale or NULL next_fire_at (e.g. from a prior
+	// shutdown that set state=completed without updating next_fire_at) from
+	// being immediately fired on the very first tick.
+	e.initNextFireTimes()
+
 	log.Printf("[cron] engine started, interval=%ds", e.interval.Load())
 
 	for {
@@ -109,6 +115,79 @@ func (e *Engine) Uptime() time.Duration {
 		return 0
 	}
 	return time.Since(e.startAt)
+}
+
+// initNextFireTimes recomputes next_fire_at for all enabled tasks that are in
+// pending, completed, or waiting state. StateError is excluded because error
+// tasks need retry-limit and backoff logic handled by rescheduleOneTask.
+// This prevents stale or NULL next_fire_at values from causing tasks to fire
+// immediately on the first tick after a restart.
+func (e *Engine) initNextFireTimes() {
+	now := time.Now()
+	tasks, err := e.store.List("", nil)
+	if err != nil {
+		log.Printf("[cron] initNextFireTimes: list tasks: %v", err)
+		return
+	}
+	for _, task := range tasks {
+		if !task.Enabled {
+			continue
+		}
+		switch task.State {
+		case model.StatePending, model.StateCompleted:
+			// These states have no valid next_fire_at — recompute.
+			// StateError is intentionally excluded: error tasks need retry-limit
+			// and backoff logic that only rescheduleOneTask handles correctly.
+			next, schedIdx, err := nextFireTime(task, now)
+			if err != nil {
+				log.Printf("[cron] init task %d: compute next fire: %v", task.ID, err)
+				continue
+			}
+			e.store.TaskMu.Lock()
+			fresh, getErr := e.store.Get(task.ID)
+			if getErr != nil {
+				e.store.TaskMu.Unlock()
+				continue
+			}
+			fresh.NextFireAt = next
+			fresh.NextFireScheduleIdx = schedIdx
+			fresh.State = model.StateWaiting
+			// Reset recording-related fields for completed tasks to match
+			// what rescheduleOneTask does, preventing stale state from leaking.
+			if task.State == model.StateCompleted {
+				fresh.CurrentLiveStart = nil
+				fresh.CurrentScheduleIdx = -1
+				fresh.MonitorUntil = nil
+				fresh.RetryCount = 0
+			}
+			if updateErr := e.store.Update(fresh); updateErr != nil {
+				log.Printf("[cron] init task %d: update: %v", task.ID, updateErr)
+			}
+			e.store.TaskMu.Unlock()
+		case model.StateWaiting:
+			// Waiting tasks may have a stale next_fire_at in the past.
+			if task.NextFireAt != nil && task.NextFireAt.After(now) {
+				continue // fire time is in the future, OK
+			}
+			next, schedIdx, err := nextFireTime(task, now)
+			if err != nil {
+				log.Printf("[cron] init task %d: compute next fire: %v", task.ID, err)
+				continue
+			}
+			e.store.TaskMu.Lock()
+			fresh, getErr := e.store.Get(task.ID)
+			if getErr != nil {
+				e.store.TaskMu.Unlock()
+				continue
+			}
+			fresh.NextFireAt = next
+			fresh.NextFireScheduleIdx = schedIdx
+			if updateErr := e.store.Update(fresh); updateErr != nil {
+				log.Printf("[cron] init task %d: update: %v", task.ID, updateErr)
+			}
+			e.store.TaskMu.Unlock()
+		}
+	}
 }
 
 func (e *Engine) evaluate(ctx context.Context) {
