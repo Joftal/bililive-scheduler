@@ -47,6 +47,13 @@ func main() {
 	defer database.Close()
 	store := db.NewStore(database)
 
+	// Cleanup old execution history (keep latest 60 per task)
+	if deleted, err := store.CleanupExecutions(60); err != nil {
+		log.Printf("[main] warning: cleanup executions: %v", err)
+	} else if deleted > 0 {
+		log.Printf("[main] cleaned up %d old execution records", deleted)
+	}
+
 	// Init bililive-go API client
 	biliClient := client.NewBiliAPI(cfg.APIURL)
 

@@ -19,10 +19,11 @@ type Engine struct {
 	client   *client.BiliAPI
 	interval atomic.Int32 // seconds, hot-reloadable
 
-	mu      sync.RWMutex
-	running bool
-	startAt time.Time
-	cancel  context.CancelFunc
+	mu          sync.RWMutex
+	running     bool
+	startAt     time.Time
+	cancel      context.CancelFunc
+	lastCleanup time.Time
 }
 
 func NewEngine(store *db.Store, client *client.BiliAPI, interval int) *Engine {
@@ -30,8 +31,9 @@ func NewEngine(store *db.Store, client *client.BiliAPI, interval int) *Engine {
 		interval = 15
 	}
 	e := &Engine{
-		store:  store,
-		client: client,
+		store:       store,
+		client:      client,
+		lastCleanup: time.Now(),
 	}
 	e.interval.Store(int32(interval))
 	return e
@@ -120,6 +122,16 @@ func (e *Engine) evaluate(ctx context.Context) {
 
 	// Phase 3: reschedule completed/error tasks
 	e.rescheduleTasks(now)
+
+	// Phase 4: daily cleanup of old execution history
+	if now.Sub(e.lastCleanup) > 24*time.Hour {
+		if deleted, err := e.store.CleanupExecutions(60); err != nil {
+			log.Printf("[cron] cleanup executions error: %v", err)
+		} else if deleted > 0 {
+			log.Printf("[cron] cleaned up %d old execution records", deleted)
+		}
+		e.lastCleanup = now
+	}
 }
 
 func (e *Engine) fireDueTasks(ctx context.Context, now time.Time) {

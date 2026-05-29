@@ -14,7 +14,6 @@ type Config struct {
 	Port           int
 	APIURL         string
 	DBPath         string
-	LogLevel       string
 	Version        string
 	APIKey         string
 	AllowedOrigins string
@@ -28,7 +27,6 @@ func Parse() *Config {
 	flag.IntVar(&cfg.Port, "port", 0, "HTTP server port (0 = random)")
 	flag.StringVar(&cfg.APIURL, "api-url", "http://localhost:8080", "bililive-go API base URL")
 	flag.StringVar(&cfg.DBPath, "db-path", "", "SQLite database path")
-	flag.StringVar(&cfg.LogLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	flag.StringVar(&cfg.Version, "version", DefaultVersion, "Version string")
 	flag.StringVar(&cfg.APIKey, "api-key", "", "API key for authentication (empty = disabled)")
 	flag.StringVar(&cfg.AllowedOrigins, "allowed-origins", "*", "Comma-separated list of allowed CORS origins (\"*\" = allow all)")

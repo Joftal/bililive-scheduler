@@ -307,6 +307,21 @@ func boolToInt(b bool) int {
 	return 0
 }
 
+// CleanupExecutions keeps only the latest maxPerTask execution records per task.
+func (s *Store) CleanupExecutions(maxPerTask int) (int64, error) {
+	result, err := s.db.Exec(`
+		DELETE FROM task_executions WHERE id IN (
+			SELECT id FROM (
+				SELECT id, ROW_NUMBER() OVER (PARTITION BY task_id ORDER BY id DESC) AS rn
+				FROM task_executions
+			) WHERE rn > ?
+		)`, maxPerTask)
+	if err != nil {
+		return 0, fmt.Errorf("cleanup executions: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 // GetConfig retrieves a config value by key. Returns defaultValue if not found.
 func (s *Store) GetConfig(key, defaultValue string) (string, error) {
 	var value string
